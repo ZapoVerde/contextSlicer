@@ -1,17 +1,61 @@
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+firebase-debug.log*
+debug.log*
+
 # Dependencies
 node_modules/
 
 # Build output
 dist/
+dist-ssr/
+build/
+out/
+storybook-static/
 
-# Local Environment files
-.env*
+# Framework outputs (optional—keep if you use them)
+.next/
+.nuxt/
+
+# Coverage & caches
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+.turbo/
+
+# Local env & secrets
+.env
+.env.*
 !.env.example
 
-# Tooling & Editor artifacts
-*.tsbuildinfo
-*.bak
-.vite/
-
-# OS generated files
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
 .DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Tool state (usually local-only)
+.firebase/
+.idx/
+
+# Project-specific
+src/ignore-me.js
+
+# Source dump artifacts (keep folder, ignore contents)
+public/source-dump/
+public/source-dump/**
+!public/source-dump/.gitkeep
+*.bak
+*.tsbuildinfo
