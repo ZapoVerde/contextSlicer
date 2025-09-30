@@ -17,7 +17,7 @@ Instead of manually copying and pasting dozens of files, you can use the Slicer'
 *   **Architectural "Docblock" Extraction:** Export a high-level summary of your project by extracting only the JSDoc-style comment blocks from the top of each file.
 *   **Wildcard & Folder Selection:** Quickly grab entire features or architectural layers using glob-style patterns (e.g., `src/features/auth/**/*`).
 *   **Client-Side Sanitation:** Safely drop a "dirty" `.zip` file of a repository, and the Slicer will automatically filter out `node_modules`, `.git`, large binary assets, and other noise, protecting your browser from memory crashes.
-*   **Live Development Mode:** Connects to a file-watching script that automatically serves a fresh, up-to-date version of your repository's source code as you work.
+*   **Live Development Mode:** Connects to a file-watching script that automatically serves a fresh, up-to-date version of your repository's source code as you work. 
 
 ### Project Status: Beta
 The Context Slicer is currently in a stable beta. It is actively used for the development of the AI Anvil project. Feedback and contributions are welcome!
