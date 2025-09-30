@@ -12,7 +12,6 @@
     // Settings specific to this app
     "composite": true,
     "strict": true,
-    "strict": true,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
