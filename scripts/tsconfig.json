@@ -1,24 +1,14 @@
 {
-    "extends": "../../../tsconfig.base.json",
-    "compilerOptions": {
-      // --- Module & Environment Settings ---
-      "module": "NodeNext",
-      "moduleResolution": "NodeNext",
-      "target": "ES2022",
-      "lib": ["ES2022"],
-  
-      // --- Interoperability ---
-      "esModuleInterop": true,
-      "allowSyntheticDefaultImports": true,
-      "allowImportingTsExtensions": true,
-  
-      // --- Type Checking & Strictness ---
-      "strict": true,
-      "noImplicitAny": true,
-  
-      // --- Output ---
-      "noEmit": true
-    },
-    "include": ["./**/*.ts"],
-    "exclude": ["node_modules"]
-  }
+  "extends": "../tsconfig.json", // It can still inherit from the main app tsconfig
+  "compilerOptions": {
+    // Settings for the Node.js scripts environment
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "noEmit": true, // We don't compile scripts, we run them with ts-node
+    "types": ["node"] // Specify node types for this environment
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["node_modules"]
+}
