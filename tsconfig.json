@@ -1,17 +1,19 @@
 {
   "compilerOptions": {
-    // Base settings from the old monorepo file
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "module": "ESNext",
-
-    // Settings specific to this app
+    
+    // --- MODERNIZATION CHANGES ---
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    // --- END MODERNIZATION ---
+    
     "composite": true,
-    "moduleResolution": "bundler",
+    "strict": true,
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,

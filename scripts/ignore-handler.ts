@@ -39,12 +39,11 @@
 
 import fs from 'fs';
 import path from 'path';
-import { REPO_ROOT, MANDATORY_INCLUSION_PATTERNS } from './config.js'; 
+import ignore from 'ignore'; // This is the modern 'import' statement that fixes the error
+import { REPO_ROOT, MANDATORY_INCLUSION_PATTERNS } from './config.js';
 import { EXPLICIT_DENY_PATTERNS } from '../src/features/context-slicer/config/sanitation.config.js';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const ignore = require('ignore');
-const ig = ignore();
+const ig = ignore(); // This is the correct way to use it
 // 1. Add the hardcoded, high-priority deny patterns first.
 ig.add(EXPLICIT_DENY_PATTERNS);
 
