@@ -1,8 +1,17 @@
-# Build & Dependency artifacts
-dist/
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+
+# Local Environment files
+.env*
+!.env.example
+
+# Tooling & Editor artifacts
 *.tsbuildinfo
 *.bak
+.vite/
 
-# Ignore the generated source dump artifacts
-public/source-dump/
+# OS generated files
+.DS_Store
