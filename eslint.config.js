@@ -6,31 +6,30 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default tseslint.config(
   {
-    // Global ignores
     ignores: ["dist/**", "vite.config.ts"],
   },
-  // Apply the recommended base configurations
   js.configs.recommended,
   ...tseslint.configs.recommended,
-
-  // Custom configuration for our project
   {
-    files: ['src/**/*.{ts,tsx}'], // Only lint files in the src directory
+    files: ['src/**/*.{ts,tsx}', 'scripts/**/*.{ts,tsx}'], // Lint both src and scripts
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
     },
+    // This is the new, important part
     languageOptions: {
+      parserOptions: {
+        project: true, // This tells the linter to find the nearest tsconfig.json
+        tsconfigRootDir: import.meta.dirname, // This tells it where to start looking
+      },
       globals: {
         ...globals.browser,
+        ...globals.node, // Also include Node.js globals for the scripts folder
       },
     },
     rules: {
-      // Apply recommended React rules
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': 'warn',
-
-      // Our custom override for unused variables
       '@typescript-eslint/no-unused-vars': [
         'error',
         {

@@ -75,10 +75,28 @@ const SourceDumpScreen: React.FC = () => {
           <ZipLoader />
         </Box>
 
-        {status === 'loading' && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: 4, gap: 2 }}>
-            <CircularProgress />
-            <Typography>Attempting to load from dev server...</Typography>
+        {(status === 'loading' || status === 'idle') && (
+          <Box sx={{ p: 4, textAlign: 'center', borderTop: '1px solid', borderColor: 'divider' }}>
+            {status === 'loading' ? (
+              <>
+                <CircularProgress />
+                <Typography sx={{ mt: 2 }}>Attempting to load from dev server...</Typography>
+              </>
+            ) : (
+              <>
+                <Typography variant="h6" gutterBottom>
+                  How it Works
+                </Typography>
+                <img 
+                  src="/context-slicer-demo.gif" 
+                  alt="Context Slicer Demo" 
+                  style={{ maxWidth: '100%', borderRadius: '8px', border: '1px solid #444', marginBottom: '16px' }} 
+                />
+                <Typography variant="body2" color="text.secondary">
+                  Drop a .zip file of a repository onto the panel above to begin.
+                </Typography>
+              </>
+            )}
           </Box>
         )}
 
