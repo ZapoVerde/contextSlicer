@@ -1,0 +1,24 @@
+{
+    "extends": "../../../tsconfig.base.json",
+    "compilerOptions": {
+      // --- Module & Environment Settings ---
+      "module": "NodeNext",
+      "moduleResolution": "NodeNext",
+      "target": "ES2022",
+      "lib": ["ES2022"],
+  
+      // --- Interoperability ---
+      "esModuleInterop": true,
+      "allowSyntheticDefaultImports": true,
+      "allowImportingTsExtensions": true,
+  
+      // --- Type Checking & Strictness ---
+      "strict": true,
+      "noImplicitAny": true,
+  
+      // --- Output ---
+      "noEmit": true
+    },
+    "include": ["./**/*.ts"],
+    "exclude": ["node_modules"]
+  }

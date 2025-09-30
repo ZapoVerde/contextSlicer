@@ -1,0 +1,40 @@
+{
+  "name": "@aianvil/context-slicer-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.28.4",
+    "@babel/traverse": "^7.28.4",
+    "@babel/types": "^7.28.4",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.1",
+    "@mui/material": "^7.3.1",
+    "ignore": "^5.3.1",
+    "jszip": "^3.10.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zustand": "^5.0.7"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.14.10",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react-swc": "^3.11.0",
+    "adm-zip": "^0.5.14",
+    "chokidar": "^3.6.0",
+    "js-yaml": "^4.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.0"
+  }
+}
