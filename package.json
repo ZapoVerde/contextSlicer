@@ -35,6 +35,8 @@
     "adm-zip": "^0.5.14",
     "chokidar": "^3.6.0",
     "eslint": "^9.36.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.22",
     "js-yaml": "^4.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.3",
