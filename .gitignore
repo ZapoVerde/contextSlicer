@@ -1,0 +1,8 @@
+# Build & Dependency artifacts
+dist/
+node_modules/
+*.tsbuildinfo
+*.bak
+
+# Ignore the generated source dump artifacts
+public/source-dump/

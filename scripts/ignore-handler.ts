@@ -36,19 +36,17 @@
  *     inclusion of the docs folder) MUST be driven by configuration imported
  *     from `config.ts`, not by hardcoded values in this file.
  */
+
 import fs from 'fs';
 import path from 'path';
-import ignore from 'ignore';
-// --- START OF CHANGE: Import the new mandatory inclusion patterns ---
 import { REPO_ROOT, MANDATORY_INCLUSION_PATTERNS } from './config.js'; 
 import { EXPLICIT_DENY_PATTERNS } from '../src/features/context-slicer/config/sanitation.config.js';
-// --- END OF CHANGE ---
 
-const ig = ignore.default();
-
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ignore = require('ignore');
+const ig = ignore();
 // 1. Add the hardcoded, high-priority deny patterns first.
 ig.add(EXPLICIT_DENY_PATTERNS);
-
 
 // 2. Recursively find and apply all .gitignore files in the monorepo.
 function findAndApplyGitignores(startPath: string): void {
