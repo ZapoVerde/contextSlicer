@@ -1,14 +1,37 @@
-// packages/context-slicer-app/src/features/context-slicer/state/zip-loader.ts
-
 /**
  * @file packages/context-slicer-app/src/features/context-slicer/state/zip-loader.ts
+ * @stamp {"ts":"2025-10-02T07:09:00Z"}
  * @architectural-role State Management / Store Slice / Data Loading & Sanitation
  *
  * @description
- * This module encapsulates the data loading, parsing, and sanitation logic for
- * the store. It is responsible for applying the client-side sanitation pipeline
- * to user-uploaded zip files by importing rules from the shared, browser-safe
- * sanitation config.
+ * This module defines a Zustand store slice responsible for all data loading,
+ * parsing, and sanitation logic. It handles two primary data sources: the live
+ * development server and user-uploaded zip archives.
+ *
+ * It orchestrates the crucial client-side sanitation pipeline, which validates
+ * and filters uploaded files to ensure they are safe and relevant. This includes
+ * enforcing a maximum file size limit of 200MB and applying a series of ignore
+ * patterns and file extension whitelists imported from the shared, browser-safe
+ * sanitation configuration.
+ *
+ * @contract
+ * State Ownership: This slice exclusively owns the application's loading status
+ *   ('idle', 'loading', 'ready', 'error'), the data source type ('dev', 'zip'),
+ *   and any associated error messages or sanitation reports.
+ *
+ * Public API:
+ *   - `loadFromDevServer`: Fetches the manifest and source dump from the dev server.
+ *   - `loadZipFile`: Processes a user-provided `File` object.
+ *   - `reset`: A convenience action to re-trigger `loadFromDevServer`.
+ *
+ * Core Invariants:
+ *   - MUST reject any user-uploaded zip file exceeding 200MB.
+ *   - MUST apply all sanitation rules from `sanitation.config.ts` to any
+ *     loaded zip buffer, regardless of its source.
+ *   - MUST correctly transition the application's global status during the
+ *     loading and parsing lifecycle.
+ *   - MUST populate the store with the `manifest`, `fileIndex`, and `zipInstance`
+ *     upon a successful load.
  */
 
 import type { StateCreator } from 'zustand';
@@ -112,7 +135,7 @@ export const createLoaderSlice: StateCreator<ZipState, [], [], LoaderSlice> = (s
 
   loadZipFile: async (file: File) => {
     // Stage 1: Pre-flight check
-    const MAX_ZIP_SIZE_MB = 50;
+    const MAX_ZIP_SIZE_MB = 200;
     if (file.size > MAX_ZIP_SIZE_MB * 1024 * 1024) {
       set({
         status: 'error',
