@@ -94,7 +94,6 @@ export async function writeZipFromFiles(zipPath: string, relPaths: string[]): Pr
     // This is a documented exception. The type definitions for AdmZip are not fully
   // compatible with the NodeNext module resolution strategy, causing a false positive
   // error. We cast to 'any' here as a pragmatic escape hatch to create the instance.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const zip = new (AdmZip as any)();
   for (const rp of relPaths) {
     const abs = path.join(REPO_ROOT, rp);

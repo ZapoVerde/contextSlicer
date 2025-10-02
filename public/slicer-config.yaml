@@ -1,0 +1,194 @@
+# ===================================================================
+# CONTEXT SLICER CONFIGURATION
+#
+# This is the single source of truth for the Context Slicer's logic.
+# You can safely edit the lists in this file to change the slicer's
+# behavior without needing to touch the application code.
+# ===================================================================
+
+# --- A version number for this config file ---
+version: 1
+
+# ===================================================================
+# SECTION 1: SANITATION RULES
+#
+# These rules act as the main security and relevance filter for
+# user-uploaded ZIP files. They answer the question:
+# "Which files are safe and relevant to even consider?"
+# ===================================================================
+sanitation:
+  # DESCRIPTION: The absolute maximum size, in megabytes (MB), for
+  # any user-uploaded ZIP file. The app will reject any file
+  # larger than this before processing it.
+  #
+  # EDIT THIS VALUE:
+  maxUploadSizeMb: 200
+
+  # -----------------------------------------------------------------
+  # Whitelist of allowed file extensions.
+  #
+  # HOW TO EDIT:
+  # This is a list of text items. The dash (-) signifies a new
+  # list item. To add a new extension, just add a new line at the
+  # end, starting with a dash and a space.
+  #
+  # EDIT THIS LIST:
+  acceptedExtensions:
+    - html
+    - css
+    - scss
+    - less
+    - js
+    - jsx
+    - ts
+    - tsx
+    - mjs
+    - cjs
+    - svg
+    - json
+    - yaml
+    - yml
+    - toml
+    - ini
+    - xml
+    - env
+    - sh
+    - bash
+    - ps1
+    - firebaserc
+    - gitignore
+    - npmrc
+    - nix
+    - md
+    - mdx
+    - txt
+    - rst
+    - py
+    - go
+    - java
+    - rb
+    - php
+    - cs
+    - c
+    - cpp
+    - h
+    - hpp
+    - csv
+    - sql
+
+  # -----------------------------------------------------------------
+  # Blacklist of files and folders to always ignore.
+  # This uses the same wildcard syntax as a .gitignore file.
+  #
+  # HOW TO EDIT:
+  # Just like the list above, add a new line starting with a dash
+  # and a space to add a new pattern.
+  #
+  # EDIT THIS LIST:
+  denyPatterns:
+    - .git
+    - .git/**
+    - node_modules
+    - node_modules/**
+    - .cache
+    - .cache/**
+    - "*.pem"
+    - "*.key"
+    - "*serviceAccount*.json"
+    - firebase*.json
+    - "**.tsbuildinfo"
+    - "**package-lock.json"
+    - packages/context-slicer-app/dist/**
+    - packages/context-slicer-app/public/source-dump/**
+    - "!packages/context-slicer-app/public/source-dump/.gitkeep"
+    - packages/client/dist/**
+    - .firebase/
+    - .idx/
+    - .vscode/*
+    - "!.vscode/extensions.json"
+    - .idea/
+    - .DS_Store
+    - "*.suo"
+    - "*.ntvs*"
+    - "*.njsproj"
+    - "*.sln"
+    - "*.sw?"
+    - src/ignore-me.js
+
+# ===================================================================
+# SECTION 2: PRESETS
+#
+# Each item below (starting with a dash) is a one-click "Preset"
+# button in the UI. A preset is a powerful shortcut for selecting
+# a complex group of related files.
+# ===================================================================
+presets:
+  - # --- PRESET 1: Project Environment ---
+    id: "environment"
+    name: "Project Environment"
+    category: "Configuration Slice"
+    summary: "Selects all core configuration files for the project's environment and tooling."
+    rationale: "This preset is valuable because environment files are scattered across the repository, have different names (e.g., '.firebaserc', 'vite.config.ts'), and are hard to select manually. This preset captures the expert knowledge of which files are needed to understand the project's foundational setup."
+    useCases:
+      - "Quickly provide context about the project's setup and tooling."
+      - "Debugging build, environment, or dependency-related issues."
+    
+    # EDIT THIS LIST of wildcard patterns to match:
+    patterns:
+      - ".firebaserc"
+      - "cors.json"
+      - "firestore.indexes.json"
+      - "pnpm-workspace.yaml"
+      - "shell.nix"
+      - "**.nix"
+      - "*.code-workspace"
+      - "**/*eslint*"
+      - "**/*vite.config.*"
+      - "**/*vitest.config.*"
+      - "**/.npmrc"
+      - "**/package.json"
+      - "**/tsconfig*.json"
+      - ".devcontainer/devcontainer.json"
+      - ".idx/dev.nix"
+    
+    # EDIT THIS LIST of file names/endings to explicitly remove from the results:
+    exclusions:
+      - "pnpm-lock.yaml"
+      - "package-lock.json"
+
+  - # --- PRESET 2: Feature: ZIP Loading ---
+    id: "feature-zip-loading"
+    name: "Feature: ZIP Loading"
+    category: "Vertical Slice"
+    summary: "A vertical slice of all files related to the ZIP file loading and sanitation feature."
+    rationale: "This preset demonstrates a 'vertical slice' through the codebase. It gathers the UI component, the state management logic, the data types, and the relevant configuration for a single feature. This is powerful because it provides complete context for a feature in isolation."
+    useCases:
+      - "Refactoring the file upload and sanitation pipeline."
+      - "Debugging an issue with how ZIP files are processed."
+
+    # EDIT THIS LIST of exact file paths for this feature slice:
+    patterns:
+      - "**/src/features/context-slicer/state/zip-loader.ts"
+      - "**/src/features/context-slicer/state/zip-state.ts"
+      - "**/src/features/context-slicer/components/ZipLoader.tsx"
+      - "**/src/features/context-slicer/config/sanitation.config.ts"
+    
+    exclusions: []
+
+  - # --- PRESET 3: Logic: Symbol Graph ---
+    id: "logic-symbol-graph"
+    name: "Logic: Symbol Graph"
+    category: "Subsystem Slice"
+    summary: "Selects all core logic files responsible for parsing code and building the symbol dependency graph."
+    rationale: "The symbol graph logic is a complex, self-contained subsystem. This preset is valuable because it isolates this specific area, allowing for focused debugging, analysis, or refactoring without the noise of the surrounding UI or state management code."
+    useCases:
+      - "Debugging why a specific symbol dependency is not being traced correctly."
+      - "Explaining the AST parsing and graph traversal algorithm."
+
+    # EDIT THIS LIST to target the symbol graph logic:
+    patterns:
+      - "**/src/features/context-slicer/logic/symbolGraph/**"
+    
+    exclusions: []
+
+# --- To add a new preset, copy one of the blocks above (from one dash to the next). ---

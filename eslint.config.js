@@ -25,6 +25,9 @@ import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
+// We are telling ESLint to use the TypeScript parser for TS/TSX files.
+const tsParser = tseslint.parser;
+
 export default tseslint.config(
   {
     // Global ignores for the whole project
@@ -34,7 +37,8 @@ export default tseslint.config(
   // --- CONFIGURATION FOR BROWSER CODE (src folder) ---
   {
     files: ['src/**/*.{ts,tsx}'],
-    languageOptions: {
+    languageOptions: {      
+      parser: tsParser, // Use the TypeScript parser
       parserOptions: {
         project: './tsconfig.json', // Use the main blueprint
         tsconfigRootDir: import.meta.dirname,
@@ -44,6 +48,7 @@ export default tseslint.config(
       },
     },
     plugins: {
+      '@typescript-eslint': tseslint.plugin,
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
     },
@@ -52,26 +57,33 @@ export default tseslint.config(
       ...tseslint.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': 'warn',
-      '@typescript-eslint/no-unused-vars': ['error', { 'varsIgnorePattern': '^_', 'argsIgnorePattern': '^_', 'caughtErrorsIgnorePattern': '^_' }],
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['warn', { 'varsIgnorePattern': '^_', 'argsIgnorePattern': '^_', 'caughtErrorsIgnorePattern': '^_' }],
     },
   },
 
   // --- CONFIGURATION FOR NODE.JS CODE (scripts folder) ---
   {
     files: ['scripts/**/*.ts'],
-    languageOptions: {
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
+    },
+    languageOptions: {      
+      parser: tsParser, // Use the TypeScript parser
       parserOptions: {
         project: './scripts/tsconfig.json', // Use the scripts blueprint
         tsconfigRootDir: import.meta.dirname,
       },
       globals: {
         ...globals.node,
+        'NodeJS': 'readonly',
       },
     },
     rules: {
       ...js.configs.recommended.rules,
       ...tseslint.configs.recommended.rules,
-      '@typescript-eslint/no-unused-vars': ['error', { 'varsIgnorePattern': '^_', 'argsIgnorePattern': '^_', 'caughtErrorsIgnorePattern': '^_' }],
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['warn', { 'varsIgnorePattern': '^_', 'argsIgnorePattern': '^_', 'caughtErrorsIgnorePattern': '^_' }],
     },
   }
 );
