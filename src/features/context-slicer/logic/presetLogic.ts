@@ -6,6 +6,8 @@
  * Each preset is defined by a hardcoded list of wildcard patterns that target a
  * conceptual group of files (e.g., "Environment", "State Management").
  * This approach is modular and easily extensible for future presets.
+ * 
+ * @TODO make these an easily discoverable config file in public along with the whitelist and exclusion lists
  */
 
 import type { FileEntry } from '../state/zip-state';
@@ -22,8 +24,8 @@ const ENVIRONMENT_PRESET_PATTERNS: string[] = [
   'firestore.indexes.json',
   'pnpm-workspace.yaml', // Assuming PNPM from repo structure
   'shell.nix',
-  
-  // --- Tooling Configs (Repo-wide) ---
+  '**.nix',
+  '*.code-workspace',
   '**/*eslint*',      // Catches .eslintrc.js, eslint.config.js, etc.
   '**/*vite.config.*', // Catches vite.config.ts, vite.config.js
   '**/*vitest.config.*',// Catches vitest.config.ts, etc.
