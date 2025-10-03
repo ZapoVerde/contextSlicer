@@ -1,4 +1,5 @@
-Of course. Here is the complete, updated `README.md` file with the new pitch integrated and all sections revised to reflect the latest architectural changes.
+[![CI Status](https://img.shields.io/github/actions/workflow/status/ZapoVerde/contextSlicer/ci.yml?branch=main)](https://github.com/ZapoVerde/contextSlicer/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/ZapoVerde/contextSlicer)](https://github.com/ZapoVerde/contextSlicer/blob/main/LICENSE)
 
 # Context Slicer
 
