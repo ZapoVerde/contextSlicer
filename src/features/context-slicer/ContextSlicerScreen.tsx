@@ -84,7 +84,16 @@ const SourceDumpScreen: React.FC = () => {
               </>
             ) : (
               <>
-                <Box sx={{ mb: 2, textAlign: 'center', maxWidth: '80ch', mx: 'auto' }}>
+                {/* --- START OF CHANGE --- */}
+                <Box sx={{ 
+                  mb: 3, // Adds margin-bottom for separation from the GIF
+                  textAlign: 'left', // Left-aligns all text within this box
+                  maxWidth: '80ch', 
+                  mx: 'auto',
+                  p: 2, // Adds padding to create the "box" effect
+                  backgroundColor: 'background.paper', // Sets a distinct background
+                  borderRadius: 1 // Adds slightly rounded corners
+                }}>
                   <Typography variant="h6" gutterBottom>
                     For developers using LLMs on large JS/TS codebases.
                   </Typography>
@@ -101,9 +110,10 @@ const SourceDumpScreen: React.FC = () => {
                     Stop curating context by hand. Start slicing it intelligently.
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                    Drag and drop a `.zip` of your repository onto the panel below to see it in action.
+                    Drag and drop a `.zip` of your repository onto the panel above to see it in action.
                   </Typography>
                 </Box>
+                {/* --- END OF CHANGE --- */}
                 <img 
                   src="/context-slicer-demo.gif" 
                   alt="Context Slicer Demo" 
