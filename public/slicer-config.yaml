@@ -192,3 +192,51 @@ presets:
     exclusions: []
 
 # --- To add a new preset, copy one of the blocks above (from one dash to the next). ---
+
+# ===================================================================
+# SECTION 3: SANITATION OVERRIDES
+#
+# These rules have the final say in the sanitation process, ensuring
+# certain files are always included, regardless of other rules.
+# ===================================================================
+sanitationOverrides:
+  # DESCRIPTION: A list of .gitignore-style patterns that MUST be
+  # included in the source dump, even if they are excluded by a
+  # .gitignore file. The '!' prefix is critical as it signifies an
+  # inclusion rule. This is the "final word" on what gets included.
+  #
+  # EDIT THIS LIST:
+  mandatoryInclusions:
+    - "!docs"
+    - "!docs/**"
+
+# ===================================================================
+# SECTION 4: OUTPUT FORMATTING
+#
+# These rules define the specific format of the generated text files.
+# ===================================================================
+output:
+  # DESCRIPTION: The text marker that is prepended to each file's
+  # content in the concatenated text dumps.
+  beginMarker: "@@FILE: "
+
+  # DESCRIPTION: The text marker that is appended after each file's
+  # content in the concatenated text dumps.
+  endMarker: "@@END_FILE@@"
+
+# ===================================================================
+# SECTION 5: LIVE DEVELOPMENT BEHAVIOR
+#
+# These values control the timing and behavior of the live-reloading
+# features when running in development mode.
+# ===================================================================
+liveDevelopment:
+  # DESCRIPTION: The delay in milliseconds (ms) that the Node.js file
+  # watcher waits after detecting a change before starting a new build.
+  # This prevents rapid-fire rebuilds when saving multiple files.
+  watchDebounceMs: 3000
+
+  # DESCRIPTION: The delay in milliseconds (ms) that the web application
+  # waits after detecting that its source is stale before automatically
+  # fetching the latest version.
+  staleRefetchDelayMs: 2500
