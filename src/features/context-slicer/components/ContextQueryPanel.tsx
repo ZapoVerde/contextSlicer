@@ -1,24 +1,23 @@
 /**
  * @file src/features/sourceDump/components/ContextQueryPanel.tsx
- * @architectural-role UI Component / Workflow Orchestrator
+ * @stamp {"ts":"2025-10-03T01:34:00Z"}
+ * @architectural-role UI Component / Dynamic Workflow Orchestrator
  *
- * @description This component is the central user interface for building a context pack.
- * It orchestrates a multi-step workflow, guiding the user through defining a set of
- * 'seed' files, optionally expanding that set with dependencies, and finally filtering
- * the result with exclusion patterns. It acts as the primary 'control panel' for all
- * query-related actions.
+ * @description
+ * This component is the central user interface for building a context pack. It has
+ * been refactored to be configuration-driven. Instead of containing hardcoded
+ * actions, it now dynamically renders a set of "Preset" buttons by reading the
+ * `presets` array from the `slicerConfig` object in the central state store.
+ * This ensures the UI is always a direct reflection of the currently loaded
+ * application configuration.
  *
  * @responsibilities
- * 1.  **Logic Consumption:** Makes a single call to the `useQueryPanelState` custom
- *     hook to acquire all necessary state, state setters, and action handlers.
- * 2.  **Layout & Workflow:** Renders a clear, multi-step UI for the query process:
- *     Step 1 (Seed Files), Step 2 (Dependency Expansion), and Step 3 (Exclusion).
- * 3.  **Component Orchestration:** Assembles the various input panels (`DocsFolderPanel`,
- *     `DependencyTracePanel`, `WildcardSearchPanel`) and places them within the
- *     appropriate steps of the workflow.
- * 4.  **Action Hub:** Serves as the main action hub, rendering the primary
- *     'Append/Replace' buttons and 'Preset' actions at the top for immediate access,
- *     along with any feedback messages (loading, error, success).
+ * 1.  **State Consumption:** Consumes all necessary state, setters, and actions
+ *     from the `useQueryPanelState` custom hook.
+ * 2.  **Dynamic Rendering:** Iterates over the `presets` array provided by the
+ *     hook to dynamically generate the UI for the preset actions.
+ * 3.  **Component Orchestration:** Assembles the various input panels and action
+ *     buttons into a cohesive, multi-step workflow for the user.
  */
 import React from 'react';
 import {
@@ -58,6 +57,8 @@ export const ContextQueryPanel: React.FC = () => {
     exclusionWildcardQuery,
     docsFolders,
     checkedDocsFolders,
+    presets,
+    
 
     // State setters
     setTraceQuery,
@@ -69,7 +70,7 @@ export const ContextQueryPanel: React.FC = () => {
 
     // Actions
     handleGenerate,
-    handleApplyEnvironmentPreset,
+    handleApplyPreset,    
   } = useQueryPanelState();
 
   const isDisabled = !isReady || isLoading;
@@ -79,23 +80,26 @@ export const ContextQueryPanel: React.FC = () => {
       <Typography variant="h6" gutterBottom>
         Context Query Tools
       </Typography>
-
-      {/* --- START OF CHANGE (1/1): Move action buttons to the top --- */}
       <Box sx={{ my: 2 }}>
         <Divider>
           <Typography variant="overline" color="text.secondary">
             Actions & Presets
           </Typography>
         </Divider>
-        <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 2 }} alignItems="center">
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={handleApplyEnvironmentPreset}
-            disabled={isDisabled}
-          >
-            Add Environment Files
-          </Button>
+        <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 2 }} alignItems="center" flexWrap="wrap">
+          {/* --- Dynamically render preset buttons --- */}
+          {presets.map(preset => (
+            <Button
+              key={preset.id}
+              variant="outlined"
+              size="small"
+              onClick={() => handleApplyPreset(preset)}
+              disabled={isDisabled}
+              title={preset.summary}
+            >
+              {preset.name}
+            </Button>
+          ))}
         </Stack>
         <ButtonGroup variant="contained" disabled={isDisabled || !canGenerate} fullWidth>
           <Button
@@ -114,7 +118,6 @@ export const ContextQueryPanel: React.FC = () => {
         {error && <Typography color="error.main" sx={{mt: 1}}>{error}</Typography>}
         {successMessage && <Typography color="success.main" sx={{mt: 1}}>{successMessage}</Typography>}
       </Box>
-      {/* --- END OF CHANGE (1/1) --- */}
 
       {/* STEP 1: Define the Seed Files */}
       <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, borderRadius: 1, mb: 2 }}>

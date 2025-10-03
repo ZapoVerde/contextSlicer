@@ -1,16 +1,17 @@
 /**
- * @file packages/context-slicer-app/src/features/context-slicer/state/zip-state.ts
- * @stamp {"ts":"2025-09-29T00:12:30Z"}
+ * @file src/features/context-slicer/state/zip-state.ts
+ * @stamp {"ts":"2025-10-03T01:11:00Z"}
  * @architectural-role State Management / Data Model Definition
  *
  * @description
  * This file defines the canonical TypeScript interfaces for the Context Slicer's
  * state and initializes the base state object. It is the single source of truth
  * for the application's data shape, ensuring type safety and consistency across
- * all features and logic modules.
+ * all features and logic modules. It now also includes types and state properties
+ * for managing the application's external YAML configuration.
  *
  * @contract
- * - MUST define and export all core data structures (e.g., `DumpManifest`, `FileEntry`).
+ * - MUST define and export all core data structures (e.g., `DumpManifest`, `FileEntry`, `SlicerConfig`).
  * - All other state management modules MUST import their types from this file.
  * - The `initialState` object defined here MUST represent a clean, default
  *   state for the application.
@@ -70,6 +71,40 @@ type ZipStatus = 'idle' | 'loading' | 'ready' | 'error';
 type SourceType = 'none' | 'dev' | 'zip';
 type GraphStatus = 'idle' | 'building' | 'ready' | 'error';
 
+// --- START OF CHANGE: New Config Types ---
+export interface Preset {
+  id: string;
+  name: string;
+  category: string;
+  summary: string;
+  rationale: string;
+  useCases: string[];
+  patterns: string[];
+  exclusions: string[];
+}
+
+export interface SlicerConfig {
+  version: number;
+  sanitation: {
+    maxUploadSizeMb: number;
+    acceptedExtensions: string[];
+    denyPatterns: string[];
+  };
+  presets: Preset[];
+  sanitationOverrides: {
+    mandatoryInclusions: string[];
+  };
+  output: {
+    beginMarker: string;
+    endMarker: string;
+  };
+  liveDevelopment: {
+    watchDebounceMs: number;
+    staleRefetchDelayMs: number;
+  };
+}
+// --- END OF CHANGE ---
+
 export interface ZipState {
   zipInstance: JSZip | null;
   fileIndex: Map<string, FileEntry> | null;
@@ -82,6 +117,9 @@ export interface ZipState {
   graphStatus: GraphStatus;
   sanitationReport: SanitationReport | null;
   resolutionErrors: string[];
+  // --- START OF CHANGE: Add slicerConfig to state ---
+  slicerConfig: SlicerConfig | null;
+  // --- END OF CHANGE ---
 
   // Actions will be injected later
   loadFromDevServer: (retryCount?: number) => Promise<void>;
@@ -89,6 +127,9 @@ export interface ZipState {
   reset: () => void;
   setTargetedPathsInput: (paths: string) => void;
   ensureSymbolGraph: () => Promise<void>;
+  // --- START OF CHANGE: Add loadConfig action signature ---
+  loadConfig: () => Promise<void>;
+  // --- END OF CHANGE ---
 }
 
 // --- Initial State ---
@@ -99,6 +140,9 @@ export const initialState: Omit<
   | 'reset'
   | 'setTargetedPathsInput'
   | 'ensureSymbolGraph'
+  // --- START OF CHANGE: Add loadConfig to omitted properties ---
+  | 'loadConfig'
+  // --- END OF CHANGE ---
 > = {
   zipInstance: null,
   fileIndex: null,
@@ -111,6 +155,9 @@ export const initialState: Omit<
   graphStatus: 'idle',
   sanitationReport: null,
   resolutionErrors: [],
+  // --- START OF CHANGE: Initialize slicerConfig ---
+  slicerConfig: null,
+  // --- END OF CHANGE ---
 };
 
 // --- Helper Function ---

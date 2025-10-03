@@ -84,9 +84,26 @@ const SourceDumpScreen: React.FC = () => {
               </>
             ) : (
               <>
-                <Typography variant="h6" gutterBottom>
-                  How it Works
-                </Typography>
+                <Box sx={{ mb: 2, textAlign: 'center', maxWidth: '80ch', mx: 'auto' }}>
+                  <Typography variant="h6" gutterBottom>
+                    For developers using LLMs on large JS/TS codebases.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    When your project grows beyond a few dozen files, providing context to an AI becomes a bottleneck. Pasting your whole repo is impossible. Manually hunting down every relevant file for a single task—a component, its store, its types, the services it calls—is slow, error-prone, and kills your workflow. You miss one file, and the AI's response is useless.
+                  </Typography>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Context Slicer automates that hunt.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    It's a specialized tool that creates token-efficient "context packs" by understanding your code's structure. Its core feature is <strong>dependency-aware tracing</strong>. Give it a starting point, and it spiders through your import graph to find every file it touches, and every file that touches it.
+                  </Typography>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Stop curating context by hand. Start slicing it intelligently.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                    Drag and drop a `.zip` of your repository onto the panel below to see it in action.
+                  </Typography>
+                </Box>
                 <img 
                   src="/context-slicer-demo.gif" 
                   alt="Context Slicer Demo" 

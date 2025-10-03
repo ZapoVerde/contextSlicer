@@ -1,21 +1,35 @@
 /**
  * @file src/features/sourceDump/components/hooks/useQueryPanelState.ts
+ * @stamp {"ts":"2025-10-03T01:32:00Z"}
  * @architectural-role Custom Hook / State & Logic Controller
+ *
+ * @description
+ * This hook encapsulates all state management and business logic for the
+ * "Context Query Tools" panel. It has been refactored to be fully
+ * configuration-driven. Instead of containing hardcoded preset logic, it
+ * now consumes the `slicerConfig` from the central state store. It provides
+ * the UI with a dynamic list of presets and a generic `handleApplyPreset`
+ * action, decoupling the query logic from the preset definitions themselves.
  */
 import { useState, useCallback, useMemo } from 'react';
 import { useZipStore } from '../../state/useZipStore';
 import { traceSymbolGraph } from '../../logic/symbolGraph';
 import { wildcardToRegExp } from '../../logic/wildcardUtils';
 import { discoverDocsFolders, getFilesForCheckedFolders } from '../../logic/docsFolderLogic';
-// --- THIS IS THE MISSING IMPORT ---
-import { getFilesForEnvironmentPreset } from '../../logic/presetLogic';
+import { getFilesForPreset } from '../../logic/presetLogic'; // --- Import generic getFilesForPreset ---
+import type { Preset } from '../../state/zip-state'; // --- Import Preset type ---
+
 
 export type TraceDirection = 'dependencies' | 'dependents' | 'both';
 export type UpdateMode = 'append' | 'replace';
 
 export function useQueryPanelState() {
-  const { fileIndex, symbolGraph, ensureSymbolGraph, targetedPathsInput, setTargetedPathsInput } =
-    useZipStore();
+  const fileIndex = useZipStore((state) => state.fileIndex);
+  const symbolGraph = useZipStore((state) => state.symbolGraph);
+  const ensureSymbolGraph = useZipStore((state) => state.ensureSymbolGraph);
+  const targetedPathsInput = useZipStore((state) => state.targetedPathsInput);
+  const setTargetedPathsInput = useZipStore((state) => state.setTargetedPathsInput);
+  const slicerConfig = useZipStore((state) => state.slicerConfig); // --- Consume slicerConfig ---
 
   const [traceQuery, setTraceQuery] = useState<string | null>(null);
   const [traceDirection, setTraceDirection] = useState<TraceDirection>('both');
@@ -36,18 +50,27 @@ export function useQueryPanelState() {
     }));
   }, []);
 
-  // --- THIS IS THE MISSING FUNCTION DEFINITION ---
-  const handleApplyEnvironmentPreset = useCallback(() => {
-    if (!fileIndex) return;
-    const presetFiles = getFilesForEnvironmentPreset(fileIndex);
+  // --- Delete handleApplyEnvironmentPreset ---
+  // The handleApplyEnvironmentPreset function is now obsolete and has been removed.
+  
+
+  // --- New generic handleApplyPreset function ---
+  const handleApplyPreset = useCallback((preset: Preset) => {
+    if (!fileIndex) {
+      setError('File index is not available.');
+      return;
+    }
+    const presetFiles = getFilesForPreset(fileIndex, preset);
     const existingPaths = new Set(
       targetedPathsInput.split(',').map(p => p.trim()).filter(Boolean)
     );
     presetFiles.forEach(p => existingPaths.add(p));
     const combinedPaths = Array.from(existingPaths).sort();
     setTargetedPathsInput(combinedPaths.join(', '));
+    setSuccessMessage(`✅ Applied preset: ${preset.name}.`);
+    setTimeout(() => setSuccessMessage(''), 4000);
   }, [fileIndex, targetedPathsInput, setTargetedPathsInput]);
-  // --- END OF MISSING DEFINITION ---
+  
 
   const symbolOptions = useMemo(() => {
     if (!symbolGraph) return [];
@@ -178,7 +201,8 @@ export function useQueryPanelState() {
     exclusionWildcardQuery,
     docsFolders,
     checkedDocsFolders,
-
+    // --- Add presets and handleApplyPreset ---
+    presets: slicerConfig?.presets ?? [],
     // State setters
     setTraceQuery,
     setTraceDirection,
@@ -189,6 +213,6 @@ export function useQueryPanelState() {
     
     // Actions
     handleGenerate,
-    handleApplyEnvironmentPreset, // Now this is correctly defined before being returned
+    handleApplyPreset, // Now this is correctly defined before being returned
   };
 }

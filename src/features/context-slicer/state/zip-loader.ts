@@ -1,56 +1,49 @@
 /**
- * @file packages/context-slicer-app/src/features/context-slicer/state/zip-loader.ts
- * @stamp {"ts":"2025-10-02T07:09:00Z"}
- * @architectural-role State Management / Store Slice / Data Loading & Sanitation
+ * @file src/features/context-slicer/state/zip-loader.ts
+ * @stamp {"ts":"2025-10-03T01:22:00Z"}
+ * @architectural-role State Management / Store Slice / Config & Data Loading
  *
  * @description
  * This module defines a Zustand store slice responsible for all data loading,
- * parsing, and sanitation logic. It handles two primary data sources: the live
- * development server and user-uploaded zip archives.
+ * parsing, and sanitation logic. It is now the application's central point for
+ * data acquisition, handling three primary tasks:
  *
- * It orchestrates the crucial client-side sanitation pipeline, which validates
- * and filters uploaded files to ensure they are safe and relevant. This includes
- * enforcing a maximum file size limit of 200MB and applying a series of ignore
- * patterns and file extension whitelists imported from the shared, browser-safe
- * sanitation configuration.
+ * 1.  **Configuration Loading:** On startup, it fetches and parses the external
+ *     `slicer-config.yaml` file, which dictates application behavior.
+ * 2.  **Dev Server Loading:** It fetches the source dump from the live development server.
+ * 3.  **User Upload Handling:** It processes user-uploaded zip archives.
+ *
+ * Crucially, all sanitation logic (file size, extensions, deny patterns) is no
+ * longer hardcoded but is driven by the `SlicerConfig` object retrieved from
+ * the state, making the sanitation pipeline fully configurable.
  *
  * @contract
- * State Ownership: This slice exclusively owns the application's loading status
- *   ('idle', 'loading', 'ready', 'error'), the data source type ('dev', 'zip'),
- *   and any associated error messages or sanitation reports.
- *
+ * State Ownership: Exclusively owns the app's loading status, data source,
+ *   error messages, sanitation reports, and the loaded configuration object.
  * Public API:
- *   - `loadFromDevServer`: Fetches the manifest and source dump from the dev server.
- *   - `loadZipFile`: Processes a user-provided `File` object.
- *   - `reset`: A convenience action to re-trigger `loadFromDevServer`.
- *
- * Core Invariants:
- *   - MUST reject any user-uploaded zip file exceeding 200MB.
- *   - MUST apply all sanitation rules from `sanitation.config.ts` to any
- *     loaded zip buffer, regardless of its source.
- *   - MUST correctly transition the application's global status during the
- *     loading and parsing lifecycle.
- *   - MUST populate the store with the `manifest`, `fileIndex`, and `zipInstance`
- *     upon a successful load.
+ *   - `loadConfig`: Fetches and parses the application's YAML configuration.
+ *   - `loadFromDevServer`: Fetches data from the dev server.
+ *   - `loadZipFile`: Processes a user-provided `File` object using config-driven rules.
+ *   - `reset`: Re-triggers `loadFromDevServer`.
  */
 
 import type { StateCreator } from 'zustand';
 import JSZip from 'jszip';
 import ignore from 'ignore';
-import type { ZipState, FileEntry, DumpManifest, SanitationReport, SkippedFile } from './zip-state';
-// --- START OF CHANGE: Import rules from the new, browser-safe shared config ---
-import { EXPLICIT_DENY_PATTERNS, ACCEPTED_FILE_EXTENSIONS } from '../config/sanitation.config';
-// --- END OF CHANGE ---
+import yaml from 'js-yaml'; 
+import type { ZipState, FileEntry, DumpManifest, SanitationReport, SkippedFile, SlicerConfig } from './zip-state'; // --- START OF CHANGE: Import SlicerConfig ---
 
 /**
  * Processes a zip file buffer, applying a sanitation pipeline to filter out
  * unwanted files before adding them to the file index.
  * @param buffer The ArrayBuffer of the zip file.
+ * @param config The loaded SlicerConfig object containing sanitation rules.
  * @returns A promise that resolves to an object containing the zip instance,
  *          the sanitized file index, and a detailed sanitation report.
  */
-async function processZipBuffer(
-  buffer: ArrayBuffer
+async function processZipBuffer( 
+  buffer: ArrayBuffer,
+  config: SlicerConfig
 ): Promise<{
   zipInstance: JSZip;
   fileIndex: Map<string, FileEntry>;
@@ -60,8 +53,10 @@ async function processZipBuffer(
   const fileIndex = new Map<string, FileEntry>();
   const skippedFiles: SkippedFile[] = [];
 
-  const ig = ignore().add(EXPLICIT_DENY_PATTERNS);
-  const acceptedExts = new Set(ACCEPTED_FILE_EXTENSIONS);
+  // --- Use config.sanitation.denyPatterns ---
+  const ig = ignore().add(config.sanitation.denyPatterns);
+  const acceptedExts = new Set(config.sanitation.acceptedExtensions);
+
 
   // --- Smarter Path Normalization ---
   let commonBasePath = '';
@@ -99,7 +94,7 @@ async function processZipBuffer(
     const ext = lastDot > 0 ? path.substring(lastDot + 1).toLowerCase() : '';
     if (ext && !acceptedExts.has(ext)) {
        const filename = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
-       if (!acceptedExts.has(filename.toLowerCase())) {
+       if (!acceptedExts.has(filename.toLowerCase())) { // Fallback for files without a dot-extension like '.firebaserc'
             skippedFiles.push({ path, reason: 'INVALID_EXTENSION' });
             continue;
        }
@@ -128,14 +123,41 @@ export interface LoaderSlice {
   loadFromDevServer: (retryCount?: number) => Promise<void>;
   loadZipFile: (file: File) => Promise<void>;
   reset: () => void;
+  // --- Add loadConfig to LoaderSlice interface ---
+  loadConfig: () => Promise<void>;
+  // --- END OF CHANGE ---
 }
 
 export const createLoaderSlice: StateCreator<ZipState, [], [], LoaderSlice> = (set, get) => ({
   reset: () => get().loadFromDevServer(0),
 
+  loadConfig: async () => {
+    set({ status: 'loading', error: null, slicerConfig: null });
+    try {
+      const configUrl = `/slicer-config.yaml?_=${Date.now()}`;
+      const configRes = await fetch(configUrl);
+      if (!configRes.ok) throw new Error(`Failed to fetch config: ${configRes.statusText}`);
+      const configText = await configRes.text();
+      const slicerConfig = yaml.load(configText) as SlicerConfig;
+      set({ slicerConfig, status: 'idle' }); // Set to idle as config loading is a precursor
+    } catch (e: unknown) {
+      console.error('[loadConfig] Failed to load or parse config:', e);
+      const message = e instanceof Error ? e.message : 'Failed to load application configuration.';
+      set({ status: 'error', error: message, slicerConfig: null });
+    }
+  },
+
   loadZipFile: async (file: File) => {
+    const slicerConfig = get().slicerConfig; 
+    if (!slicerConfig) { // --- Guard clause for missing config ---
+      set({ status: 'error', source: 'none', error: 'Application configuration not loaded yet. Please refresh the page.', sanitationReport: null });
+      return;
+    }
+
     // Stage 1: Pre-flight check
-    const MAX_ZIP_SIZE_MB = 200;
+    // --- START OF CHANGE: Use config.sanitation.maxUploadSizeMb ---
+    const MAX_ZIP_SIZE_MB = slicerConfig.sanitation.maxUploadSizeMb;
+    // --- END OF CHANGE ---
     if (file.size > MAX_ZIP_SIZE_MB * 1024 * 1024) {
       set({
         status: 'error',
@@ -149,7 +171,9 @@ export const createLoaderSlice: StateCreator<ZipState, [], [], LoaderSlice> = (s
     set({ status: 'loading', error: null, graphStatus: 'idle', symbolGraph: null, sanitationReport: null });
     try {
       const buffer = await file.arrayBuffer();
-      const { fileIndex, zipInstance, sanitationReport } = await processZipBuffer(buffer);
+      // --- START OF CHANGE: Pass slicerConfig to processZipBuffer ---
+      const { fileIndex, zipInstance, sanitationReport } = await processZipBuffer(buffer, slicerConfig);
+      // --- END OF CHANGE ---
 
       if (fileIndex.size === 0) {
         throw new Error('After sanitation, no valid source files were found in this zip.');
@@ -167,6 +191,12 @@ export const createLoaderSlice: StateCreator<ZipState, [], [], LoaderSlice> = (s
   },
 
   loadFromDevServer: async (retryCount = 0) => {
+    const slicerConfig = get().slicerConfig; // --- START OF CHANGE: Get config from store ---
+    if (!slicerConfig) { // --- START OF CHANGE: Guard clause for missing config ---
+      set({ status: 'error', source: 'none', error: 'Application configuration not loaded yet. Please refresh the page.', sanitationReport: null });
+      return;
+    }
+
     // On the very first attempt of a new load cycle, clean up any old errors.
     if (retryCount === 0) {
       // If this is the initial load of the app, set status to 'loading'.
@@ -189,7 +219,9 @@ export const createLoaderSlice: StateCreator<ZipState, [], [], LoaderSlice> = (s
       if (!zipRes.ok) throw new Error('Zip file not found'); // Generic error for retry
       
       const buffer = await zipRes.arrayBuffer();
-      const { fileIndex, zipInstance, sanitationReport } = await processZipBuffer(buffer);
+      // --- START OF CHANGE: Pass slicerConfig to processZipBuffer ---
+      const { fileIndex, zipInstance, sanitationReport } = await processZipBuffer(buffer, slicerConfig);
+      // --- END OF CHANGE ---
 
       // On success, clear everything and set the new state.
       set({ manifest, fileIndex, zipInstance, status: 'ready', source: 'dev', error: null, sanitationReport });
@@ -197,7 +229,7 @@ export const createLoaderSlice: StateCreator<ZipState, [], [], LoaderSlice> = (s
     } catch (_e: unknown) {
       // This is the resilient retry logic. It will try up to 30 times (60 seconds).
       if (retryCount < 30) {
-        setTimeout(() => get().loadFromDevServer(retryCount + 1), 2000); // Wait 2s
+        setTimeout(() => get().loadFromDevServer(retryCount + 1), slicerConfig.liveDevelopment.staleRefetchDelayMs); // --- START OF CHANGE: Use config for retry delay ---
       } else {
         // Only after all retries fail do we show the final error message.
         const message = 'Data not found. The source generation script is likely not running or has failed. Please check the terminal running `pnpm dev:slicer` and then click "Refresh Dev".';

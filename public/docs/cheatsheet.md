@@ -1,3 +1,4 @@
+
 # Context Slicer Cheatsheet
 
 This is a quick, goal-oriented guide to using the Context Slicer.
@@ -8,7 +9,7 @@ This is a quick, goal-oriented guide to using the Context Slicer.
 
 #### **...get EVERYTHING in the repository?**
 
-1.  Use the **Global Dumps** card at the top.
+1.  Use the **Global Dumps** card at the bottom.
 2.  Click **Download All as .zip** or **Download All as .txt**.
 
 #### **...get the code for a specific feature?**
@@ -22,12 +23,6 @@ This is a quick, goal-oriented guide to using the Context Slicer.
 
 1.  Go to **Context Query Tools** -> **Inclusion Patterns**.
 2.  Type a wildcard pattern: `src/features/auth/components/**/*`.
-3.  Click **Append to Pack**.
-
-#### **...quickly add all the architecture documents?**
-
-1.  Go to **Context Query Tools** -> **Include Docs Folders**.
-2.  Check the boxes for `architecture`, `design`, etc.
 3.  Click **Append to Pack**.
 
 #### **...create a high-level architectural summary for an AI?**
@@ -51,3 +46,10 @@ This is a quick, goal-oriented guide to using the Context Slicer.
 1.  Go to **Context Query Tools** -> **Exclusion Patterns**.
 2.  Type a pattern to match your test files, e.g., `**/*.test.ts`.
 3.  Generate your pack. The exclusion pattern will be applied automatically.
+
+#### **...change the tool's behavior or add a new Preset button?**
+
+1.  Open the single source of truth for all rules: `/packages/context-slicer-app/public/slicer-config.yaml`.
+2.  **To add a Preset:** Copy an existing preset block under the `presets:` section and edit its `id`, `name`, `summary`, and `patterns`.
+3.  **To change sanitation rules:** Edit the lists under the `sanitation:` section to add a new file type or ignore a new directory.
+4.  Restart your development server and refresh the Slicer application to see your changes.
