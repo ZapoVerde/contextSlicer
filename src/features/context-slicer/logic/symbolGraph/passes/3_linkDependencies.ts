@@ -76,7 +76,7 @@ export function linkDependencies(
               if (binding) {
                 for (const refPath of binding.referencePaths) {
                   const importerScope = refPath.findParent(
-                    p =>
+                    (p: NodePath) =>
                       p.isFunctionDeclaration() ||
                       p.isClassDeclaration() ||
                       p.isVariableDeclarator()
