@@ -21,7 +21,7 @@ export default defineConfig({
   server: {
     port: 5174,
     open: true,
-    host: true,
+    host: '0.0.0.0',
     hmr: {
       // This is the definitive fix for the Cloud Workstation environment.
       // It tells the HMR client (in the browser) to connect to the standard
