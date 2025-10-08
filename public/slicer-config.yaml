@@ -145,11 +145,15 @@ presets:
       - "**/*eslint*"
       - "**/*vite.config.*"
       - "**/*vitest.config.*"
+      - "**/vite-env.d.ts"
+      - "**/vitest.d.ts"
       - "**/.npmrc"
       - "**/package.json"
       - "**/tsconfig*.json"
+      - "**/tsconfig*.*.json"
       - ".devcontainer/devcontainer.json"
       - ".idx/dev.nix"
+
     
     # EDIT THIS LIST of file names/endings to explicitly remove from the results:
     exclusions:
@@ -234,9 +238,9 @@ liveDevelopment:
   # DESCRIPTION: The delay in milliseconds (ms) that the Node.js file
   # watcher waits after detecting a change before starting a new build.
   # This prevents rapid-fire rebuilds when saving multiple files.
-  watchDebounceMs: 3000
+  watchDebounceMs: 5000
 
   # DESCRIPTION: The delay in milliseconds (ms) that the web application
   # waits after detecting that its source is stale before automatically
   # fetching the latest version.
-  staleRefetchDelayMs: 2500
+  staleRefetchDelayMs: 5000
