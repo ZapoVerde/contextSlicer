@@ -10,7 +10,29 @@
 version: 1
 
 # ===================================================================
-# SECTION 1: SANITATION RULES
+# SECTION 1: PROJECT DEFINITION
+#
+# This section defines the external project that the Context Slicer
+# should analyze.
+# ===================================================================
+project:
+  # DESCRIPTION: This is the single most important setting. It defines
+  # the relative path from THIS slicer-config.yaml file to the root
+  # of the project you want to analyze.
+  #
+  # EXAMPLE: If your project structure is:
+  #   /my-cool-project
+  #     /packages
+  #       /context-slicer-app  <-- This tool is here
+  #         /public
+  #           /slicer-config.yaml
+  #   The value should be '../../' to point to /my-cool-project.
+  #
+  # EDIT THIS VALUE:
+  targetProjectRoot: '../'
+
+# ===================================================================
+# SECTION 2: SANITATION RULES
 #
 # These rules act as the main security and relevance filter for
 # user-uploaded ZIP files. They answer the question:
@@ -79,6 +101,8 @@ sanitation:
   # -----------------------------------------------------------------
   # Blacklist of files and folders to always ignore.
   # This uses the same wildcard syntax as a .gitignore file.
+  # NOTE: The build script automatically ignores its own output
+  # directory. You do not need to add it here.
   #
   # HOW TO EDIT:
   # Just like the list above, add a new line starting with a dash
@@ -116,7 +140,7 @@ sanitation:
     - src/ignore-me.js
 
 # ===================================================================
-# SECTION 2: PRESETS
+# SECTION 3: PRESETS
 #
 # Each item below (starting with a dash) is a one-click "Preset"
 # button in the UI. A preset is a powerful shortcut for selecting
@@ -198,7 +222,7 @@ presets:
 # --- To add a new preset, copy one of the blocks above (from one dash to the next). ---
 
 # ===================================================================
-# SECTION 3: SANITATION OVERRIDES
+# SECTION 4: SANITATION OVERRIDES
 #
 # These rules have the final say in the sanitation process, ensuring
 # certain files are always included, regardless of other rules.
@@ -215,7 +239,7 @@ sanitationOverrides:
     - "!docs/**"
 
 # ===================================================================
-# SECTION 4: OUTPUT FORMATTING
+# SECTION 5: OUTPUT FORMATTING
 #
 # These rules define the specific format of the generated text files.
 # ===================================================================
@@ -229,7 +253,7 @@ output:
   endMarker: "@@END_FILE@@"
 
 # ===================================================================
-# SECTION 5: LIVE DEVELOPMENT BEHAVIOR
+# SECTION 6: LIVE DEVELOPMENT BEHAVIOR
 #
 # These values control the timing and behavior of the live-reloading
 # features when running in development mode.
