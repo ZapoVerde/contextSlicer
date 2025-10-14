@@ -26,10 +26,10 @@ project:
   #       /context-slicer-app  <-- This tool is here
   #         /public
   #           /slicer-config.yaml
-  #   The value should be '../../' to point to /my-cool-project.
+  #   The value should be '../../../' to point to /my-cool-project.
   #
   # EDIT THIS VALUE:
-  targetProjectRoot: '../'
+  targetProjectRoot: '../../../'
 
 # ===================================================================
 # SECTION 2: SANITATION RULES
@@ -66,7 +66,6 @@ sanitation:
     - tsx
     - mjs
     - cjs
-    - svg
     - json
     - yaml
     - yml
@@ -111,24 +110,24 @@ sanitation:
   # EDIT THIS LIST:
   denyPatterns:
     - .git
-    - .git/**
-    - node_modules
-    - node_modules/**
+    - ".git/**"
+    - "**node_modules/**"
     - .cache
-    - .cache/**
+    - ".cache/**"
     - "*.pem"
     - "*.key"
     - "*serviceAccount*.json"
-    - firebase*.json
+    - "firebase*.json"
     - "**.tsbuildinfo"
     - "**package-lock.json"
-    - packages/context-slicer-app/dist/**
-    - packages/context-slicer-app/public/source-dump/**
+    - "**/dist/**"
+    - "**/context-slicer-app/public/source-dump/**"
+    - "**pnpm-lock.yaml"
     - "!packages/context-slicer-app/public/source-dump/.gitkeep"
-    - packages/client/dist/**
     - .firebase/
+    - "**functions/lib**"
     - .idx/
-    - .vscode/*
+    - ".vscode/*"
     - "!.vscode/extensions.json"
     - .idea/
     - .DS_Store
