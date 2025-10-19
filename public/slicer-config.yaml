@@ -96,6 +96,9 @@ sanitation:
     - hpp
     - csv
     - sql
+    - rules         # For Firebase security rules
+    - lock          # For Nix flake.lock
+    - code-workspace # For VS Code workspace config
 
   # -----------------------------------------------------------------
   # Blacklist of files and folders to always ignore.
@@ -125,7 +128,6 @@ sanitation:
     - ".cache/"
     - ".cache/**"
     - ".firebase/"
-    - ".idx/**"
     - "storybook-static/" # From .gitignore
     - "coverage/"         # From .gitignore
     - ".nyc_output/"      # From .gitignore
@@ -146,7 +148,6 @@ sanitation:
 
     # --- Editor & OS Specific ---
     - ".idea/"
-    - ".vscode/**"
     - ".DS_Store"
     - "*.suo"
     - "*.ntvs*"
@@ -188,6 +189,10 @@ presets:
     - "package.json"        # Selects the root package.json
     - "tsconfig.json"       # Selects the root tsconfig.json
     - "vitest.config.ts"    # Selects the root vitest.config.ts
+    - "storage.rules"
+    - "firestore.rules"
+    - "AiAnvil.code-workspace"
+
 
     # --- Nix Environment ---
     - "flake.nix"
@@ -269,8 +274,6 @@ sanitationOverrides:
   mandatoryInclusions:
     - "!docs"
     - "!docs/**"
-    - "!.idx/dev.nix"
-    - "!.vscode/extensions.json"
 
 # ===================================================================
 # SECTION 5: OUTPUT FORMATTING
