@@ -10,7 +10,8 @@
   },
   "include": [
     "./**/*.ts",
-    "../src/features/context-slicer/config/sanitation.config.ts"
+    "../src/features/context-slicer/config/sanitation.config.ts",
+    "../src/features/context-slicer/state/zip-state.ts"
   ],
   "exclude": ["node_modules"]
 }

@@ -10,7 +10,29 @@
 version: 1
 
 # ===================================================================
-# SECTION 1: SANITATION RULES
+# SECTION 1: PROJECT DEFINITION
+#
+# This section defines the external project that the Context Slicer
+# should analyze.
+# ===================================================================
+project:
+  # DESCRIPTION: This is the single most important setting. It defines
+  # the relative path from THIS slicer-config.yaml file to the root
+  # of the project you want to analyze.
+  #
+  # EXAMPLE: If your project structure is:
+  #   /my-cool-project
+  #     /packages
+  #       /context-slicer-app  <-- This tool is here
+  #         /public
+  #           /slicer-config.yaml
+  #   The value should be '../../../' to point to /my-cool-project.
+  #
+  # EDIT THIS VALUE:
+  targetProjectRoot: '../../../'
+
+# ===================================================================
+# SECTION 2: SANITATION RULES
 #
 # These rules act as the main security and relevance filter for
 # user-uploaded ZIP files. They answer the question:
@@ -44,7 +66,6 @@ sanitation:
     - tsx
     - mjs
     - cjs
-    - svg
     - json
     - yaml
     - yml
@@ -75,10 +96,15 @@ sanitation:
     - hpp
     - csv
     - sql
+    - rules         # For Firebase security rules
+    - lock          # For Nix flake.lock
+    - code-workspace # For VS Code workspace config
 
   # -----------------------------------------------------------------
   # Blacklist of files and folders to always ignore.
   # This uses the same wildcard syntax as a .gitignore file.
+  # NOTE: The build script automatically ignores its own output
+  # directory. You do not need to add it here.
   #
   # HOW TO EDIT:
   # Just like the list above, add a new line starting with a dash
@@ -86,37 +112,54 @@ sanitation:
   #
   # EDIT THIS LIST:
   denyPatterns:
-    - .git
-    - .git/**
-    - node_modules
-    - node_modules/**
-    - .cache
-    - .cache/**
+    # --- Version Control ---
+    - ".git/"
+    - ".git/**"
+
+    # --- Dependencies & Lockfiles ---
+    - "**/node_modules/**"
+    - "**/pnpm-lock.yaml"
+    - "**/package-lock.yaml"
+
+    # --- Build Artifacts & Caches ---
+    - "**/dist/**"
+    - "**/lib/**"
+    - "**.tsbuildinfo"
+    - ".cache/"
+    - ".cache/**"
+    - ".firebase/"
+    - "storybook-static/" # From .gitignore
+    - "coverage/"         # From .gitignore
+    - ".nyc_output/"      # From .gitignore
+    - ".turbo/"           # From .gitignore
+
+    # --- Logs ---
+    - "logs/"             # From .gitignore
+    - "*.log"             # From .gitignore
+    - "*-debug.log*"      # From .gitignore
+
+    # --- Secrets & Sensitive Files ---
     - "*.pem"
     - "*.key"
     - "*serviceAccount*.json"
-    - firebase*.json
-    - "**.tsbuildinfo"
-    - "**package-lock.json"
-    - packages/context-slicer-app/dist/**
-    - packages/context-slicer-app/public/source-dump/**
-    - "!packages/context-slicer-app/public/source-dump/.gitkeep"
-    - packages/client/dist/**
-    - .firebase/
-    - .idx/
-    - .vscode/*
-    - "!.vscode/extensions.json"
-    - .idea/
-    - .DS_Store
+    - ".env"              # From .gitignore
+    - ".env.*"            # From .gitignore
+    - "!.env.example"     # From .gitignore
+
+    # --- Editor & OS Specific ---
+    - ".idea/"
+    - ".DS_Store"
     - "*.suo"
     - "*.ntvs*"
     - "*.njsproj"
     - "*.sln"
     - "*.sw?"
-    - src/ignore-me.js
 
+    # --- Project Specific Exclusions ---
+    - "**/context-slicer-app/public/source-dump/**"
+    - "!packages/context-slicer-app/public/source-dump/.gitkeep"
 # ===================================================================
-# SECTION 2: PRESETS
+# SECTION 3: PRESETS
 #
 # Each item below (starting with a dash) is a one-click "Preset"
 # button in the UI. A preset is a powerful shortcut for selecting
@@ -135,21 +178,43 @@ presets:
     
     # EDIT THIS LIST of wildcard patterns to match:
     patterns:
-      - ".firebaserc"
-      - "cors.json"
-      - "firestore.indexes.json"
-      - "pnpm-workspace.yaml"
-      - "shell.nix"
-      - "**.nix"
-      - "*.code-workspace"
-      - "**/*eslint*"
-      - "**/*vite.config.*"
-      - "**/*vitest.config.*"
-      - "**/.npmrc"
-      - "**/package.json"
-      - "**/tsconfig*.json"
-      - ".devcontainer/devcontainer.json"
-      - ".idx/dev.nix"
+    # --- Root Level Configuration ---
+    - ".firebaserc"
+    - "firebase.json"         # CRITICAL: Was missing from the original list
+    - "pnpm-workspace.yaml"
+    - ".npmrc"
+    - "cors.json"
+    - "firestore.indexes.json"
+    - "eslint.config.js"      # CRITICAL: Be specific, don't use wildcards for the root config
+    - "package.json"        # Selects the root package.json
+    - "tsconfig.json"       # Selects the root tsconfig.json
+    - "vitest.config.ts"    # Selects the root vitest.config.ts
+    - "storage.rules"
+    - "firestore.rules"
+    - "AiAnvil.code-workspace"
+
+
+    # --- Nix Environment ---
+    - "flake.nix"
+    - "flake.lock"            # CRITICAL: The reproducibility contract was missing
+    - ".idx/dev.nix"
+
+    # --- IDE / Container ---
+    - ".devcontainer/devcontainer.json"
+    - "*.code-workspace"
+
+    # --- Tooling Config (in any package) ---
+    # This pattern explicitly starts from the 'packages/' directory,
+    # avoiding the ambiguity of the root-level globstar.
+    - "packages/**/package.json"
+    - "packages/**/tsconfig*.json"
+    - "packages/**/vite.config.*"
+    - "packages/**/vitest.config.*"
+
+    # --- Type Declarations (in any package) ---
+    - "**/vite-env.d.ts"
+    - "**/vitest.d.ts"
+
     
     # EDIT THIS LIST of file names/endings to explicitly remove from the results:
     exclusions:
@@ -194,7 +259,7 @@ presets:
 # --- To add a new preset, copy one of the blocks above (from one dash to the next). ---
 
 # ===================================================================
-# SECTION 3: SANITATION OVERRIDES
+# SECTION 4: SANITATION OVERRIDES
 #
 # These rules have the final say in the sanitation process, ensuring
 # certain files are always included, regardless of other rules.
@@ -211,7 +276,7 @@ sanitationOverrides:
     - "!docs/**"
 
 # ===================================================================
-# SECTION 4: OUTPUT FORMATTING
+# SECTION 5: OUTPUT FORMATTING
 #
 # These rules define the specific format of the generated text files.
 # ===================================================================
@@ -225,7 +290,7 @@ output:
   endMarker: "@@END_FILE@@"
 
 # ===================================================================
-# SECTION 5: LIVE DEVELOPMENT BEHAVIOR
+# SECTION 6: LIVE DEVELOPMENT BEHAVIOR
 #
 # These values control the timing and behavior of the live-reloading
 # features when running in development mode.
@@ -234,9 +299,9 @@ liveDevelopment:
   # DESCRIPTION: The delay in milliseconds (ms) that the Node.js file
   # watcher waits after detecting a change before starting a new build.
   # This prevents rapid-fire rebuilds when saving multiple files.
-  watchDebounceMs: 3000
+  watchDebounceMs: 5000
 
   # DESCRIPTION: The delay in milliseconds (ms) that the web application
   # waits after detecting that its source is stale before automatically
   # fetching the latest version.
-  staleRefetchDelayMs: 2500
+  staleRefetchDelayMs: 5000
