@@ -15,16 +15,13 @@
  *     external_io: none # It only interacts with the local filesystem.
  */
 
-import fs from 'fs';
 import path from 'path';
-// --- START OF FIX ---
 // This is a documented exception following the project's established pattern
 // for handling CJS/ESM interop issues under the 'NodeNext' module resolution
 // strategy (see AdmZip usage in `file-utils.ts`). The 'ignore' package's
 // type definitions cause a false positive error, so we cast to 'any' as a
 // pragmatic escape hatch.
 import ignore from 'ignore';
-// --- END OF FIX ---
 import { slicerConfig, REPO_ROOT, DUMP_ROOT } from './config.js';
 
 const ig = (ignore as any)();
@@ -32,66 +29,14 @@ const ig = (ignore as any)();
 // 1. Add the base deny patterns from the loaded configuration file.
 ig.add(slicerConfig.sanitation.denyPatterns);
 
-// 2. Recursively find and apply all .gitignore files within the target project.
-function findAndApplyGitignores(startPath: string): void {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(startPath, { withFileTypes: true });
-  } catch {
-    // Fail silently if a directory is not readable
-    return;
-  }
 
-
-  for (const entry of entries) {
-    const fullPath: string = path.join(startPath, entry.name);
-    const relativePath: string = path.relative(REPO_ROOT, fullPath).replace(/\\/g, '/');
-    
-    // Important: check if the directory itself is ignored before recursing into it.
-    // We only check directories here to avoid skipping .gitignore files in ignored dirs.
-    if (entry.isDirectory() && ig.ignores(relativePath)) {
-      continue;
-    }
-
-    if (entry.name === '.gitignore') {
-      const gitignoreContent: string = fs.readFileSync(fullPath, 'utf8');
-      const baseDir: string = path.dirname(relativePath);
-
-      const patterns: string[] = gitignoreContent
-        .split('\n')
-        .map(p => p.trim())
-        .filter((p): p is string => !!(p && !p.startsWith('#')));
-
-      // Make patterns relative to the REPO_ROOT for the ignore instance.
-      const relativePatterns: string[] = patterns.map(p => {
-        const isNegated: boolean = p.startsWith('!');
-        const pattern: string = isNegated ? p.substring(1) : p;
-        const resolvedPattern: string = pattern.startsWith('/')
-          ? path.join(baseDir, pattern.substring(1)).replace(/\\/g, '/')
-          : path.join(baseDir, pattern).replace(/\\/g, '/');
-        
-        return isNegated ? `!${resolvedPattern}` : resolvedPattern;
-      });
-
-      ig.add(relativePatterns);
-
-    } else if (entry.isDirectory()) {
-      findAndApplyGitignores(fullPath);
-    }
-  }
-}
-
-// Start the recursive search from the target project's root.
-findAndApplyGitignores(REPO_ROOT);
-
-
-// 3. Add the dynamic "self-aware" exclusion rule.
+// 2. Add the dynamic "self-aware" exclusion rule.
 // This calculates the path from the target project's root to the tool's own output directory.
 const selfIgnorePath = path.relative(REPO_ROOT, DUMP_ROOT).replace(/\\/g, '/');
 ig.add(selfIgnorePath);
 
 
-// 4. Finally, add the mandatory inclusion rules from the config.
+// 2. Finally, add the mandatory inclusion rules from the config.
 // These are added last to ensure they have the highest precedence.
 ig.add(slicerConfig.sanitationOverrides.mandatoryInclusions);
 

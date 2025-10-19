@@ -109,35 +109,54 @@ sanitation:
   #
   # EDIT THIS LIST:
   denyPatterns:
-    - .git
+    # --- Version Control ---
+    - ".git/"
     - ".git/**"
-    - "**node_modules/**"
-    - .cache
+
+    # --- Dependencies & Lockfiles ---
+    - "**/node_modules/**"
+    - "**/pnpm-lock.yaml"
+    - "**/package-lock.yaml"
+
+    # --- Build Artifacts & Caches ---
+    - "**/dist/**"
+    - "**/lib/**"
+    - "**.tsbuildinfo"
+    - ".cache/"
     - ".cache/**"
+    - ".firebase/"
+    - ".idx/**"
+    - "storybook-static/" # From .gitignore
+    - "coverage/"         # From .gitignore
+    - ".nyc_output/"      # From .gitignore
+    - ".turbo/"           # From .gitignore
+
+    # --- Logs ---
+    - "logs/"             # From .gitignore
+    - "*.log"             # From .gitignore
+    - "*-debug.log*"      # From .gitignore
+
+    # --- Secrets & Sensitive Files ---
     - "*.pem"
     - "*.key"
     - "*serviceAccount*.json"
-    - "firebase*.json"
-    - "**.tsbuildinfo"
-    - "**package-lock.json"
-    - "**/dist/**"
-    - "**/context-slicer-app/public/source-dump/**"
-    - "**pnpm-lock.yaml"
-    - "!packages/context-slicer-app/public/source-dump/.gitkeep"
-    - .firebase/
-    - "**functions/lib**"
-    - .idx/
-    - ".vscode/*"
-    - "!.vscode/extensions.json"
-    - .idea/
-    - .DS_Store
+    - ".env"              # From .gitignore
+    - ".env.*"            # From .gitignore
+    - "!.env.example"     # From .gitignore
+
+    # --- Editor & OS Specific ---
+    - ".idea/"
+    - ".vscode/**"
+    - ".DS_Store"
     - "*.suo"
     - "*.ntvs*"
     - "*.njsproj"
     - "*.sln"
     - "*.sw?"
-    - src/ignore-me.js
 
+    # --- Project Specific Exclusions ---
+    - "**/context-slicer-app/public/source-dump/**"
+    - "!packages/context-slicer-app/public/source-dump/.gitkeep"
 # ===================================================================
 # SECTION 3: PRESETS
 #
@@ -158,24 +177,38 @@ presets:
     
     # EDIT THIS LIST of wildcard patterns to match:
     patterns:
-      - ".firebaserc"
-      - "cors.json"
-      - "firestore.indexes.json"
-      - "pnpm-workspace.yaml"
-      - "shell.nix"
-      - "**.nix"
-      - "*.code-workspace"
-      - "**/*eslint*"
-      - "**/*vite.config.*"
-      - "**/*vitest.config.*"
-      - "**/vite-env.d.ts"
-      - "**/vitest.d.ts"
-      - "**/.npmrc"
-      - "**/package.json"
-      - "**/tsconfig*.json"
-      - "**/tsconfig*.*.json"
-      - ".devcontainer/devcontainer.json"
-      - ".idx/dev.nix"
+    # --- Root Level Configuration ---
+    - ".firebaserc"
+    - "firebase.json"         # CRITICAL: Was missing from the original list
+    - "pnpm-workspace.yaml"
+    - ".npmrc"
+    - "cors.json"
+    - "firestore.indexes.json"
+    - "eslint.config.js"      # CRITICAL: Be specific, don't use wildcards for the root config
+    - "package.json"        # Selects the root package.json
+    - "tsconfig.json"       # Selects the root tsconfig.json
+    - "vitest.config.ts"    # Selects the root vitest.config.ts
+
+    # --- Nix Environment ---
+    - "flake.nix"
+    - "flake.lock"            # CRITICAL: The reproducibility contract was missing
+    - ".idx/dev.nix"
+
+    # --- IDE / Container ---
+    - ".devcontainer/devcontainer.json"
+    - "*.code-workspace"
+
+    # --- Tooling Config (in any package) ---
+    # This pattern explicitly starts from the 'packages/' directory,
+    # avoiding the ambiguity of the root-level globstar.
+    - "packages/**/package.json"
+    - "packages/**/tsconfig*.json"
+    - "packages/**/vite.config.*"
+    - "packages/**/vitest.config.*"
+
+    # --- Type Declarations (in any package) ---
+    - "**/vite-env.d.ts"
+    - "**/vitest.d.ts"
 
     
     # EDIT THIS LIST of file names/endings to explicitly remove from the results:
@@ -236,6 +269,8 @@ sanitationOverrides:
   mandatoryInclusions:
     - "!docs"
     - "!docs/**"
+    - "!.idx/dev.nix"
+    - "!.vscode/extensions.json"
 
 # ===================================================================
 # SECTION 5: OUTPUT FORMATTING
