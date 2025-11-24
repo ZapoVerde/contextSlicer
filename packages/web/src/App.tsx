@@ -24,7 +24,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box, CircularProgress, Alert, Typography } from '@mui/material';
 // We import the theme directly to apply it at the root
-import { theme } from '@slicer/core/src/theme/theme';
+import { theme } from '@slicer/core';
 import { ContextSlicerScreen, useSlicerStore } from '@slicer/core';
 
 // TODO: In Phase 2, we will implement and import the ZipAdapter here.

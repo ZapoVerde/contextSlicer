@@ -36,6 +36,8 @@ export class ZipFileSource implements FileSource {
     this.file = file;
   }
 
+  async saveConfig() { console.warn('Read only'); }
+
   /**
    * Initialize the zip and extract the config if present.
    * This must be called before getFileList.

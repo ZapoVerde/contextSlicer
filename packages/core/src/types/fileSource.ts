@@ -11,7 +11,7 @@
  * 3. DECOUPLES the application state from specific data loading mechanisms (JSZip/Fetch).
  */
 
-import type { SlicerConfig } from '../state/slicer-state';
+import type { SlicerConfig } from '../state/slicer-state.js';
 
 /**
  * @id packages/core/src/types/fileSource.ts#FileMetadata
@@ -38,6 +38,8 @@ export interface FileSource {
    * In Desktop, this comes from the server's auto-detected settings.
    */
   getConfig(): Promise<SlicerConfig>;
+
+  saveConfig(config: SlicerConfig): Promise<void>; 
 
   /**
    * Retrieves the list of all available files with their metadata.

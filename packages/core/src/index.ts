@@ -21,11 +21,14 @@
  */
 
 // The Main UI Screen
-export { default as ContextSlicerScreen } from './ContextSlicerScreen';
+export { default as ContextSlicerScreen } from './ContextSlicerScreen.js';
 
 // The State Manager (Required for injecting adapters)
-export { useSlicerStore } from './state/useSlicerStore';
+export { useSlicerStore } from './state/useSlicerStore.js';
 
 // Types required for Adapter Implementation
-export type { FileSource, FileMetadata } from './types/fileSource';
-export type { SlicerConfig } from './state/slicer-state';
+export type { FileSource, FileMetadata } from './types/fileSource.js';
+export type { SlicerConfig } from './state/slicer-state.js';
+
+// Theme
+export { theme } from './theme/theme.js';

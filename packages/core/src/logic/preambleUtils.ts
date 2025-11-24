@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/preambleUtils.ts
- * @stamp {"ts":"2025-09-28T18:24:00Z"}
+ * @stamp {"ts":"2025-11-24T16:00:00Z"}
  * @architectural-role Logic Utility / Text Processor
  *
  * @description
@@ -12,7 +12,7 @@
  * State Ownership: This module is stateless.
  * Public API: `extractFilePreamble(content: string): string | null`
  * Core Invariants: The function must correctly identify and return the first
- * block comment from the start of a string, or return null if
+ * block comment from the start of a string, ignoring shebangs, or return null if
  * no such comment is present at the beginning of the content.
  *
  * @core-principles
@@ -21,9 +21,13 @@
  * 3. IS completely decoupled from the application's state and UI.
  */
 export function extractFilePreamble(content: string): string | null {
-  // This regex looks for the first open block at the start of the file,
+  // 1. Remove optional shebang line (e.g. #!/usr/bin/env node) which appears
+  // in CLI executables, so we can still find the preamble immediately following it.
+  const cleanContent = content.replace(/^#!.*\n/, '');
+
+  // 2. This regex looks for the first open block at the start of the (cleaned) file,
   // allowing for leading whitespace, and captures everything until the first `*/`.
-  const match = content.match(/^\s*(\/\*\*[\s\S]*?\*\/)/);
+  const match = cleanContent.match(/^\s*(\/\*\*[\s\S]*?\*\/)/);
 
   return match ? match[1] : null;
 }
