@@ -1,7 +1,7 @@
 /**
  * @file packages/desktop/server/config.ts
  * @stamp 2025-11-24T12:00:00Z
- * @architectural-role Configuration
+ * @architectural-role Configuration 
  * @description
  * Defines the runtime environment configuration. In an executable context,
  * the "Repo Root" is the Current Working Directory (CWD).

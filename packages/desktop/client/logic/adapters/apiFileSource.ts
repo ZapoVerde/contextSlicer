@@ -1,11 +1,9 @@
 /**
  * @file packages/desktop/client/logic/adapters/apiFileSource.ts
- * @stamp 2025-11-24T13:00:00Z
+ * @stamp 2025-11-24T16:40:00Z
  * @architectural-role Data Adapter
- *
  * @description
  * A concrete implementation of FileSource that talks to the local Express API.
- * This allows the frontend to "see" the local filesystem via the server.
  *
  * @core-principles
  * 1. IS the bridge between the Desktop UI and the Local Server.
@@ -15,7 +13,7 @@
  * @contract
  *   assertions:
  *     purity: mutates # Network I/O.
- *     external_io: http # Fetches from localhost.
+ *     external_io: http # Fetches from relative /api.
  */
 
 import type { FileSource, FileMetadata, SlicerConfig } from '@slicer/core';
@@ -42,29 +40,19 @@ export class ApiFileSource implements FileSource {
   async getFileList(): Promise<FileMetadata[]> {
     const res = await fetch(`${API_BASE}/files`);
     if (!res.ok) throw new Error('Failed to fetch file list');
-    
-    // The server returns { path: string, size: number }[]
-    // This matches FileMetadata exactly.
     const files = await res.json();
     return files as FileMetadata[];
   }
 
   async getFileContent(path: string): Promise<string> {
-    // Encode path components to handle slashes safely in URL
-    // Actually, our server uses wildcard *, so we append the path directly.
-    // However, standard fetch handles the URL encoding.
     const res = await fetch(`${API_BASE}/file/${path}`);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch file: ${path} (${res.status})`);
-    }
+    if (!res.ok) throw new Error(`Failed to fetch file: ${path}`);
     return res.text();
   }
 
   async getFileBuffer(path: string): Promise<Uint8Array> {
     const res = await fetch(`${API_BASE}/file/${path}`);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch file buffer: ${path}`);
-    }
+    if (!res.ok) throw new Error(`Failed to fetch file buffer: ${path}`);
     const buffer = await res.arrayBuffer();
     return new Uint8Array(buffer);
   }

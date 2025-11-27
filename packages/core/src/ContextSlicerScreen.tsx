@@ -1,12 +1,13 @@
 /**
  * @file packages/core/src/ContextSlicerScreen.tsx
- * @stamp {"ts":"2025-11-24T11:30:00Z"}
+ * @stamp {"ts":"2025-11-24T17:15:00Z"}
  * @architectural-role UI Component / Screen Entry Point
  *
  * @description
  * This component serves as the main visual container for the application.
  * It orchestrates the layout of the high-level panels (Loader, Query Tools,
- * Pack Generator) and handles the responsive framing.
+ * Pack Generator) and handles the responsive framing. It now includes the
+ * "File Type Distribution" modal for advanced configuration.
  *
  * @core-principles
  * 1. IS the primary layout container for the feature.
@@ -16,20 +17,21 @@
  * @contract
  *   assertions:
  *     purity: pure # React component.
- *     state_ownership: none # Consumes global store status.
+ *     state_ownership: [modalOpen] # Manages local UI state for the modal.
  *     external_io: none
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Box, Paper, Typography, CircularProgress, Stack, IconButton } from '@mui/material';
-import ContentCutIcon from '@mui/icons-material/ContentCut';
-import GitHubIcon from '@mui/icons-material/GitHub';
-import { SourceDumpPanel } from './components/SourceDumpPanel';
-import { ZipLoader } from './components/ZipLoader';
-import { useSlicerStore } from './state/useSlicerStore';
+import { ContentCut as ContentCutIcon, GitHub as GitHubIcon, Settings as SettingsIcon } from '@mui/icons-material';
+import { SourceDumpPanel } from './components/SourceDumpPanel.js';
+import { ZipLoader } from './components/ZipLoader.js';
+import { FileTypeDistributionModal } from './components/FileTypeDistributionModal.js';
+import { useSlicerStore } from './state/useSlicerStore.js';
 
 const SourceDumpScreen: React.FC = () => {
   const { status } = useSlicerStore();
+  const [modalOpen, setModalOpen] = useState(false);
 
   return (
     <Box sx={{ p: { xs: 1, sm: 2, md: 3 }, height: '100%', overflowY: 'auto' }}>
@@ -47,16 +49,27 @@ const SourceDumpScreen: React.FC = () => {
             </Box>
           </Stack>
 
-          <IconButton
-            component="a"
-            href="https://github.com/ZapoVerde/contextSlicer"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="View on GitHub"
-            sx={{ color: 'text.secondary' }}
-          >
-            <GitHubIcon sx={{ fontSize: '2rem' }} />
-          </IconButton>
+          <Stack direction="row" spacing={1}>
+            <IconButton 
+              onClick={() => setModalOpen(true)} 
+              title="Manage File Types"
+              // Only enable settings if we have a loaded config/index
+              disabled={status !== 'ready'}
+            >
+              <SettingsIcon />
+            </IconButton>
+
+            <IconButton
+              component="a"
+              href="https://github.com/ZapoVerde/contextSlicer"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="View on GitHub"
+              sx={{ color: 'text.secondary' }}
+            >
+              <GitHubIcon sx={{ fontSize: '2rem' }} />
+            </IconButton>
+          </Stack>
         </Stack>
       </Box>
 
@@ -111,6 +124,11 @@ const SourceDumpScreen: React.FC = () => {
 
         {status === 'ready' && <SourceDumpPanel />}
       </Paper>
+
+      <FileTypeDistributionModal 
+        open={modalOpen} 
+        onClose={() => setModalOpen(false)} 
+      />
     </Box>
   );
 };

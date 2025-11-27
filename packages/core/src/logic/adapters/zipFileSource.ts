@@ -36,7 +36,12 @@ export class ZipFileSource implements FileSource {
     this.file = file;
   }
 
-  async saveConfig() { console.warn('Read only'); }
+  async saveConfig(config: SlicerConfig): Promise<void> {
+    console.warn('[ZipFileSource] Save not supported for Zip files. Config is ephemeral.');
+    // We do nothing here. The optimistic update in the store will allow the
+    // user to play with settings for the current session, but it won't save to the zip.
+    return Promise.resolve();
+  }
 
   /**
    * Initialize the zip and extract the config if present.

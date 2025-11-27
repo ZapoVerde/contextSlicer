@@ -1,14 +1,21 @@
 /**
  * @file packages/core/src/types/fileSource.ts
- * @stamp 2025-11-24T06:00:00Z
+ * @stamp 2025-11-24T16:30:00Z
  * @architectural-role Type Definition
- * @description Defines the abstract interface for data retrieval. This abstraction allows
- * the core application to operate identically whether data is coming from a local zip file
- * (Web) or a live file system watcher (Desktop).
+ * @description
+ * Defines the abstract interface for data retrieval and persistence. This abstraction
+ * allows the core application to operate identically whether data is coming from a
+ * local zip file (Web) or a live file system watcher (Desktop).
+ *
  * @core-principles
  * 1. IS the boundary between the Core Logic and the Platform implementation.
  * 2. MUST be implemented by platform-specific adapters.
- * 3. DECOUPLES the application state from specific data loading mechanisms (JSZip/Fetch).
+ * 3. DECOUPLES the application state from specific data loading mechanisms.
+ *
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     external_io: none
  */
 
 import type { SlicerConfig } from '../state/slicer-state.js';
@@ -34,12 +41,14 @@ export interface FileMetadata {
 export interface FileSource {
   /**
    * Retrieves the initial application configuration.
-   * In Web, this comes from a fetched YAML file.
-   * In Desktop, this comes from the server's auto-detected settings.
    */
   getConfig(): Promise<SlicerConfig>;
 
-  saveConfig(config: SlicerConfig): Promise<void>; 
+  /**
+   * Persists updated configuration back to the source.
+   * @param config The new configuration object to save.
+   */
+  saveConfig(config: SlicerConfig): Promise<void>;
 
   /**
    * Retrieves the list of all available files with their metadata.

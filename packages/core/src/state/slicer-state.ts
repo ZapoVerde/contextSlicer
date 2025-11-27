@@ -9,7 +9,7 @@
  *     external_io: none
  */
 
-import type { SymbolGraph } from '../logic/symbolGraph/types';
+import type { SymbolGraph } from '../logic/symbolGraph/types.js';
 
 // Re-export SlicerConfig related types for use in FileSource
 export interface Preset {
@@ -88,6 +88,12 @@ export interface SlicerState {
   fileIndex: Map<string, FileEntry> | null;
   slicerConfig: SlicerConfig | null;
   
+  /**
+   * The currently active data adapter instance.
+   * Retained in state to allow writing config changes back to the source.
+   */
+  activeAdapter: import('../types/fileSource.js').FileSource | null;
+
   // App Status
   status: SlicerStatus;
   source: SourceType;
@@ -102,25 +108,27 @@ export interface SlicerState {
   // User Input
   targetedPathsInput: string;
   
-  // Actions (Injected by slices)
+  // Actions
   setTargetedPathsInput: (paths: string) => void;
   ensureSymbolGraph: () => Promise<void>;
   
+  setFileSource: (source: import('../types/fileSource.js').FileSource, sourceType: SourceType) => Promise<void>;
+  
   /**
-   * The new core action: Injects a platform-specific source adapter.
-   * This triggers the loading process.
+   * Updates the configuration in the store and attempts to persist it via the active adapter.
    */
-  setFileSource: (source: import('../types/fileSource').FileSource, sourceType: SourceType) => Promise<void>;
+  updateConfig: (newConfig: SlicerConfig) => Promise<void>;
   
   reset: () => void;
 }
 
 export const initialState: Omit<
   SlicerState,
-  'setTargetedPathsInput' | 'ensureSymbolGraph' | 'setFileSource' | 'reset'
+  'setTargetedPathsInput' | 'ensureSymbolGraph' | 'setFileSource' | 'updateConfig' | 'reset'
 > = {
   fileIndex: null,
   slicerConfig: null,
+  activeAdapter: null, // Initialize as null
   status: 'idle',
   source: 'none',
   error: null,

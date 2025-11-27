@@ -1,49 +1,49 @@
 /**
  * @file packages/core/src/state/slicer-loader.ts
- * @stamp 2025-11-24T06:10:00Z
+ * @stamp 2025-11-24T16:35:00Z
  * @architectural-role State Management
  * @description
- * Implements the loading logic for the SlicerStore. It uses the abstract FileSource
- * to populate the file index and configuration, keeping the store platform-agnostic.
+ * Implements the loading and persistence logic for the SlicerStore.
+ *
  * @core-principles
  * 1. ORCHESTRATES the data loading lifecycle (Config -> Files -> Graph).
- * 2. DELEGATES actual data retrieval to the injected FileSource.
+ * 2. DELEGATES actual data retrieval and persistence to the injected FileSource.
  * 3. ENFORCES state transitions (loading -> ready/error).
+ *
+ * @contract
+ *   assertions:
+ *     purity: mutates
+ *     state_ownership: [status, error, source, activeAdapter, slicerConfig, fileIndex]
+ *     external_io: none # Delegates to adapter
  */
 
 import type { StateCreator } from 'zustand';
-import type { SlicerState, FileEntry, SourceType } from './slicer-state';
+import type { SlicerState, FileEntry, SourceType, SlicerConfig } from './slicer-state';
 import type { FileSource } from '../types/fileSource';
 
 export interface LoaderSlice {
   setFileSource: (source: FileSource, sourceType: SourceType) => Promise<void>;
+  updateConfig: (newConfig: SlicerConfig) => Promise<void>;
   reset: () => void;
 }
 
 export const createLoaderSlice: StateCreator<SlicerState, [], [], LoaderSlice> = (set, get) => ({
   reset: () => {
-    // Basic reset logic; platform specific re-initialization is handled by the platform app
-    set({ status: 'idle', error: null, fileIndex: null, symbolGraph: null });
+    set({ status: 'idle', error: null, fileIndex: null, symbolGraph: null, activeAdapter: null });
   },
 
   setFileSource: async (source: FileSource, sourceType: SourceType) => {
-    set({ status: 'loading', error: null, source: sourceType });
+    set({ status: 'loading', error: null, source: sourceType, activeAdapter: source });
 
     try {
-      // 1. Load Configuration
       const config = await source.getConfig();
-      
-      // 2. Load File List (Metadata)
       const fileList = await source.getFileList();
       
-      // 3. Construct the File Index (Lazy Loading)
       const fileIndex = new Map<string, FileEntry>();
-      
       for (const meta of fileList) {
         fileIndex.set(meta.path, {
           path: meta.path,
           size: meta.size,
-          // Closure captures the source instance for lazy fetching
           getText: () => source.getFileContent(meta.path),
           getUint8: () => source.getFileBuffer(meta.path),
         });
@@ -53,13 +53,11 @@ export const createLoaderSlice: StateCreator<SlicerState, [], [], LoaderSlice> =
         slicerConfig: config,
         fileIndex,
         status: 'ready',
-        // Clear old graph data
         symbolGraph: null,
         graphStatus: 'idle',
         resolutionErrors: []
       });
 
-      // 4. Auto-trigger graph build (optional, matches previous behavior)
       get().ensureSymbolGraph();
 
     } catch (error: unknown) {
@@ -68,4 +66,27 @@ export const createLoaderSlice: StateCreator<SlicerState, [], [], LoaderSlice> =
       set({ status: 'error', error: msg });
     }
   },
+
+  updateConfig: async (newConfig: SlicerConfig) => {
+    const { activeAdapter } = get();
+    
+    // 1. Optimistic update
+    set({ slicerConfig: newConfig });
+
+    // 2. Persist if possible
+    if (activeAdapter) {
+      try {
+        await activeAdapter.saveConfig(newConfig);
+        console.log('[Loader] Config persisted successfully.');
+        
+        // 3. Refresh file list if sanitation rules changed
+        // For simplicity, we trigger a full reload to re-run the scanner/zip-filter
+        await get().setFileSource(activeAdapter, get().source);
+        
+      } catch (e) {
+        console.error('[Loader] Failed to save config:', e);
+        // Note: We keep the optimistic update for now, but ideally we'd rollback on error.
+      }
+    }
+  }
 });
