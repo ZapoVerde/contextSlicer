@@ -1,4 +1,8 @@
-Of course. Here is the complete, updated `README.md` file with the new pitch integrated and all sections revised to reflect the latest architectural changes.
+
+[![CI Status](https://img.shields.io/github/actions/workflow/status/ZapoVerde/contextSlicer/ci.yml?branch=main)](https://github.com/ZapoVerde/contextSlicer/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/ZapoVerde/contextSlicer)](https://github.com/ZapoVerde/contextSlicer/blob/main/LICENSE)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/ZapoVerde/contextSlicer)](https://github.com/ZapoVerde/contextSlicer/releases/latest)
+[![Release Desktop App](https://github.com/ZapoVerde/contextSlicer/actions/workflows/release.yml/badge.svg)](https://github.com/ZapoVerde/contextSlicer/actions/workflows/release.yml)
 
 # Context Slicer
 
@@ -8,133 +12,103 @@ Of course. Here is the complete, updated `README.md` file with the new pitch int
 
 > **For developers using LLMs on large JS/TS codebases.**
 >
-> When your project grows beyond a few dozen files, providing context to an AI becomes a bottleneck. Pasting your whole repo is impossible. Manually hunting down every relevant file for a single task—a component, its store, its types, the services it calls—is slow, error-prone, and kills your workflow. You miss one file, and the AI's response is useless.
+> When your project grows beyond a few dozen files, providing context to an AI becomes a bottleneck. Pasting your whole repo is impossible. Manually hunting down every relevant file for a single task is slow and error-prone.
 
 **Context Slicer automates that hunt.**
 
-It's a specialized tool that creates token-efficient "context packs" by understanding your code's structure. Its core feature is **dependency-aware tracing**. Give it a starting point, and it spiders through your import graph to find every file it touches, and every file that touches it.
-
-**Stop curating context by hand. Start slicing it intelligently.**
-
-### Key Features
-
-*   **Dependency-Aware Tracing:** Select a single file or function, and the Slicer will traverse your code's dependency graph to automatically find all related files (both dependencies and dependents).
-*   **Configurable Behavior via YAML:** The tool's core logic is not hardcoded. Sanitation rules, UI presets, and live-reload timings are all defined in a simple `slicer-config.yaml` file, making it easy to tailor the tool to your project's specific needs.
-*   **Wildcard & Folder Selection:** Quickly grab entire features or architectural layers using glob-style patterns (e.g., `src/features/auth/**/*`).
-*   **Configurable Client-Side Sanitation:** Safely drop a "dirty" `.zip` file of a repository, and the Slicer will automatically filter out `node_modules`, `.git`, and other noise based on rules you can edit, protecting your browser from memory crashes.
-*   **Live Development Mode:** Connects to a file-watching script that automatically serves a fresh, up-to-date version of your repository's source code as you work.
-*   **Architectural "Docblock" Extraction:** Export a high-level summary of your project by extracting only the JSDoc-style comment blocks from the top of each file.
-
-### Project Status: Beta
-The Context Slicer is currently in a stable beta. It is actively used for the development of its parent project. Feedback and contributions are welcome!
+It creates token-efficient "context packs" by understanding your code's structure. Its core feature is **dependency-aware tracing**: give it a starting point, and it spiders through your import graph to find exactly what the AI needs to understand that file.
 
 ---
 
-### The Core Workflow
+## 🚀 Quick Start (No Installation Required)
 
-The user experience is designed as a simple, three-step process:
+The easiest way to use Context Slicer is the standalone desktop application. It runs locally on your machine and requires no Node.js installation.
 
-1.  **Load Your Source Code:**
-    *   **For Live Development:** Run the built-in file watcher (`pnpm dev`) which continuously serves a fresh `source-dump.zip` of your project. The Slicer app will load this automatically.
-    *   **For Any Repository:** Download a repository as a `.zip` file and simply drag-and-drop it onto the Slicer's control panel. The app will sanitize it and load it into the browser's memory.
+### 1. Download
+Go to the **[Latest Release Page](https://github.com/ZapoVerde/contextSlicer/releases/latest)** and download the executable for your OS:
+*   **Windows:** `desktop-win.exe`
+*   **Linux:** `desktop-linux`
 
-2.  **Build Your Query:**
-    *   Use the query tools to compose your context pack. Start with a one-click **Preset** (e.g., "Project Environment") and then append the precise results of a dependency trace for a specific file.
-    *   The large text area in the **Targeted Pack Generator** is the source of truth for your pack. You can always edit the comma-separated list of files directly.
+### 2. Run
+Place the executable in the **root folder of the project you want to analyze** and run it.
 
-3.  **Export the Result:**
-    *   Click **Copy to Clipboard** to get a single, formatted text block containing a file tree diagram followed by the content of every selected file.
-    *   Use the **`[x] Docblocks Only`** or **`[x] Tree Only`** checkboxes for specialized exports.
+*   **Linux:** You may need to grant execution permissions first:
+    ```bash
+    chmod +x desktop-linux
+    ./desktop-linux
+    ```
+*   **Windows:** Just double-click `desktop-win.exe`.
 
----
-
-### How It Works: A Three-Phase System
-
-The Context Slicer operates using a powerful architecture that moves all heavy processing into the browser.
-
-1.  **Phase 1: Configuration Loading (Browser)**
-    *   On startup, the application first fetches and parses the `/public/slicer-config.yaml` file. This object becomes the single source of truth for all subsequent logic, including sanitation rules and the presets that appear in the UI.
-
-2.  **Phase 2: Source Code Generation (Optional, Node.js)**
-    *   An optional file-watching script (`scripts/generate-dump.ts`) can be run locally. It scans a project directory, respects `.gitignore` rules, and packages all relevant source code into a single `source-dump.zip` file. This zip is then served to the front-end application.
-
-3.  **Phase 3: Run-Time Consumption (React & In-Browser Parsing)**
-    *   The React application fetches this `source-dump.zip` (or receives one from a user upload) and unpacks it entirely within the browser's memory using `JSZip`.
-    *   Crucially, it then uses `@babel/parser` to parse all JavaScript and TypeScript files into an **Abstract Syntax Tree (AST)**.
-    *   This AST is used to build a **Symbol Dependency Graph**, which maps the relationships between every file, function, and class in your project. This in-browser graph is what powers the dependency tracing feature, allowing for instant, powerful code analysis with no backend server required.
+### 3. Slice
+The tool will start a local server and automatically open your browser to `http://localhost:3000`. It will immediately scan the current directory and be ready for use.
 
 ---
 
-### **First-Time Configuration & Usage**
+## ⚙️ Configuration
 
-The Context Slicer is a standalone tool designed to be pointed at any external TypeScript/JS project. To use it on your own codebase, you must complete a one-time configuration to tell the Slicer where your project is located.
+The Context Slicer works out-of-the-box, but you can customize it by creating a `slicer-config.yaml` file in the same directory as the executable.
 
-#### **1. Pointing the Slicer at Your Project**
+**Common Configurations:**
+*   **`sanitation.denyPatterns`**: Ignore specific folders (e.g., `dist`, `coverage`, `__generated__`).
+*   **`presets`**: Create one-click buttons to select specific architectural layers of your app.
 
-The entire build process is controlled by a single configuration file.
-
-*   **File Location:** `packages/context-slicer-app/public/slicer-config.yaml`
-
-Open this file. The most critical setting is `targetProjectRoot` at the very top. You must change this value to the correct **relative path** from the `slicer-config.yaml` file to the root directory of the project you want to analyze.
-
-**Example:**
-
-Imagine your projects are structured like this:
-
-```text
-/my-workspace/
-├── my-awesome-project/      <-- This is the project you want to analyze
-│   ├── src/
-│   └── package.json
-└── context-slicer-project/  <-- This is the Context Slicer tool
-    └── packages/
-        └── context-slicer-app/
-            └── public/
-                └── slicer-config.yaml
-```
-
-To get from `slicer-config.yaml` to `my-awesome-project`, you need to go up four levels (`../`) to reach `/my-workspace/` and then down into `my-awesome-project/`.
-
-The correct setting in `slicer-config.yaml` would be:
-
+**Example `slicer-config.yaml`:**
 ```yaml
-project:
-  targetProjectRoot: '../../../../my-awesome-project'
+version: 1
+sanitation:
+  maxUploadSizeMb: 500
+  denyPatterns:
+    - ".git"
+    - "node_modules"
+    - "**/__generated__/**"
+presets:
+  - id: "auth-flow"
+    name: "Auth Flow"
+    patterns:
+      - "src/features/auth/**"
 ```
 
-#### **2. Running in Live Development Mode**
+---
 
-The "Live Development Mode" provides a seamless workflow where the Slicer automatically updates with your latest code as you work. This requires running **two processes in two separate terminals**.
+## 🛠 Features
 
-**Terminal 1: Start the Backend File Watcher**
+*   **Dependency-Aware Tracing:** Select a file, and the Slicer finds all imports and dependents automatically using a real AST graph.
+*   **Smart Sanitation:** Automatically filters out `node_modules`, lockfiles, and binary assets to keep context packs lean.
+*   **Token Estimation:** See the token count of your selected context in real-time before copying.
+*   **Live Mode:** When running the desktop app, the file list updates as you save files in your project.
+*   **Docblock Extraction:** Option to export *only* the JSDoc/comments from files to generate high-level architectural summaries.
 
-This script is the engine. It watches your target project for file changes and continuously regenerates the source package that the UI consumes.
+---
 
+## 👨‍💻 Contributing (Development Setup)
+
+If you want to modify the source code of Context Slicer itself, follow these steps.
+
+**Prerequisites:**
+*   Node.js v22+
+*   pnpm
+
+### 1. Install Dependencies
 ```bash
-# From the root of the context-slicer-project repository:
-pnpm --filter @aianvil/context-slicer-app exec ts-node scripts/generate-dump.ts --watch```
-
-Wait for the initial build to complete. You will see a summary of the generated files in the console.
-
-**Terminal 2: Start the Frontend UI Server**
-
-This command serves the Context Slicer's web interface.
-
-```bash
-# From the root of the context-slicer-project repository:
-pnpm dev
+git clone https://github.com/ZapoVerde/contextSlicer.git
+cd contextSlicer
+pnpm install
 ```
 
-The application will open at `http://localhost:5174`. It will automatically load the source package generated by the watcher. Now, any time you save a file in your target project, the Slicer's UI will detect the change and automatically refresh its data.
+### 2. Run in Development Mode
+This starts the UI server and the file-watching backend simultaneously.
+```bash
+pnpm dev:desktop
+```
 
-#### **3. (Optional) Customizing Behavior**
+### 3. Build Release Executables
+To create the standalone binaries locally:
+```bash
+pnpm package:desktop
+```
+The output files will be located in `packages/desktop/release/`.
 
-The `slicer-config.yaml` file is the single source of truth for the tool's behavior. You can customize it to fit your project's needs:
-
-*   **`sanitation.denyPatterns`**: Add any additional files or directories you want the Slicer to always ignore (e.g., `**/__generated__/**`).
-*   **`presets`**: Create your own one-click preset buttons in the UI to quickly select common architectural slices of your project. Copy an existing preset and modify its `patterns` to get started.
 ---
 
 ### License
-
-This project is licensed under the MIT License.
+MIT License.
