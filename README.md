@@ -10,9 +10,9 @@
 
 ---
 
-**For developers using LLMs on large JS/TS codebases.**
-
-When your project grows beyond a few dozen files, providing context to an AI becomes a bottleneck. Pasting your whole repo is impossible. Manually hunting down every relevant file for a single task is slow and error-prone.
+> **For developers using LLMs on large JS/TS codebases.**
+>
+> When your project grows beyond a few dozen files, providing context to an AI becomes a bottleneck. Pasting your whole repo is impossible. Manually hunting down every relevant file for a single task is slow and error-prone.
 
 **Context Slicer automates that hunt.**
 
@@ -20,63 +20,72 @@ It creates token-efficient "context packs" by understanding your code's structur
 
 ---
 
-## 🚀 Quick Start (No Installation Required)
+## 🚀 Quick Start
 
-The easiest way to use Context Slicer is the standalone desktop application. It runs locally on your machine and requires no Node.js installation.
+You can run Context Slicer as a standalone desktop application. No Node.js installation is required.
 
-### 1. Download
-Go to the **[Latest Release Page](https://github.com/ZapoVerde/contextSlicer/releases/latest)** and download the executable for your OS:
-*   **Windows:** `desktop-win.exe`
-*   **Linux:** `desktop-linux`
+### Option A: Browser Download
+1.  Go to the **[Latest Release Page](https://github.com/ZapoVerde/contextSlicer/releases/latest)**.
+2.  Download `desktop-win.exe` (Windows) or `desktop-linux` (Linux/WSL).
+3.  Place it in your project root and run it.
 
-### 2. Run
-Place the executable in the **root folder of the project you want to analyze** and run it.
+### Option B: Command Line (Linux / macOS / WSL)
+Run this one-liner to download the latest version, make it executable, and rename it to `slicer`:
 
-*   **Linux:** You may need to grant execution permissions first:
-    ```bash
-    chmod +x desktop-linux
-    ./desktop-linux
-    ```
-*   **Windows:** Just double-click `desktop-win.exe`.
+```bash
+curl -L -o slicer https://github.com/ZapoVerde/contextSlicer/releases/latest/download/desktop-linux && chmod +x slicer
+```
 
-### 3. Slice
-The tool will start a local server and automatically open your browser to `http://localhost:3000`. It will immediately scan the current directory and be ready for use.
+**To use it:**
+```bash
+./slicer
+```
+
+### Option C: GitHub CLI
+If you have `gh` installed:
+
+```bash
+gh release download --pattern "desktop-linux" --clobber
+chmod +x desktop-linux
+./desktop-linux
+```
 
 ---
 
 ## ⚙️ Configuration
 
-The Context Slicer works out-of-the-box, but you can customize it by creating a `slicer-config.yaml` file in the same directory as the executable.
+Context Slicer is highly configurable. It uses a `slicer-config.yaml` file as the single source of truth for exclusion rules, file extensions, and presets.
 
-**Common Configurations:**
-*   **`sanitation.denyPatterns`**: Ignore specific folders (e.g., `dist`, `coverage`, `__generated__`).
-*   **`presets`**: Create one-click buttons to select specific architectural layers of your app.
+### 1. Initialize Configuration
+To customize the tool (e.g., to ignore specific folders), generate a default configuration file in your project root:
 
-**Example `slicer-config.yaml`:**
-```yaml
-version: 1
-sanitation:
-  maxUploadSizeMb: 500
-  denyPatterns:
-    - ".git"
-    - "node_modules"
-    - "**/__generated__/**"
-presets:
-  - id: "auth-flow"
-    name: "Auth Flow"
-    patterns:
-      - "src/features/auth/**"
+```bash
+./slicer --init
 ```
+
+This creates a well-documented `slicer-config.yaml`.
+
+### 2. Edit via UI (Recommended)
+You do not need to edit the YAML file manually.
+1.  Run the app: `./slicer`
+2.  Click the **Settings (Gear Icon)** in the top right.
+3.  **Project Tab:** Change the root directory using the visual Folder Browser.
+4.  **Exclusions Tab:** Add or remove ignored folders (e.g., `dist/`, `node_modules/`).
+5.  **Extensions Tab:** Toggle allowed file types.
+
+**Changes made in the UI are automatically saved to `slicer-config.yaml`.**
 
 ---
 
 ## 🛠 Features
 
 *   **Dependency-Aware Tracing:** Select a file, and the Slicer finds all imports and dependents automatically using a real AST graph.
-*   **Smart Sanitation:** Automatically filters out `node_modules`, lockfiles, and binary assets to keep context packs lean.
-*   **Token Estimation:** See the token count of your selected context in real-time before copying.
-*   **Live Mode:** When running the desktop app, the file list updates as you save files in your project.
+*   **Smart Sanitation:**
+    *   **Desktop Mode:** Configurable via `slicer-config.yaml`. Explicitly excludes noise like `node_modules` and `.git`.
+    *   **Web Mode:** Supports "Volatile Configuration," allowing you to filter a loaded Zip file in-memory without modifying the file itself.
+*   **Live Mode:** The desktop app watches your filesystem. Changes you make in your IDE are instantly reflected in the Slicer.
 *   **Docblock Extraction:** Option to export *only* the JSDoc/comments from files to generate high-level architectural summaries.
+*   **Presets:** Create one-click buttons (via config) to select specific architectural layers (e.g., "Auth System", "Database Schema").
 
 ---
 
@@ -96,7 +105,7 @@ pnpm install
 ```
 
 ### 2. Run in Development Mode
-This starts the UI server and the file-watching backend simultaneously.
+This starts the UI server (Vite) and the file-watching backend (Express) simultaneously.
 ```bash
 pnpm dev:desktop
 ```

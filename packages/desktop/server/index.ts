@@ -203,13 +203,18 @@ app.post('/api/config', async (req, res) => {
 
 // --- STATIC UI SERVING ---
 const UI_ROOT = path.join(_dirname, '../public');
+const INDEX_HTML = path.join(UI_ROOT, 'index.html');
 
-if (fs.existsSync(UI_ROOT)) {
+// Check for index.html existence, not just the folder.
+// In dev, the folder 'public' might exist (for dumps), but index.html is missing.
+if (fs.existsSync(UI_ROOT) && fs.existsSync(INDEX_HTML)) {
   app.use(express.static(UI_ROOT));
-  app.get(/.*/, (req, res) => res.sendFile(path.join(UI_ROOT, 'index.html')));
+  app.get(/.*/, (req, res) => res.sendFile(INDEX_HTML));
 } else {
+  // In Dev mode (or if build is missing), just serve a status message.
+  // The React app is served by Vite on a different port (5173).
   console.log('> UI Root not found (Normal for Dev Mode):', UI_ROOT);
-  app.get('/', (req, res) => res.send('Context Slicer API Running'));
+  app.get('/', (req, res) => res.send('Context Slicer API Running. Use the Vite server for UI.'));
 }
 
 // --- STARTUP ---

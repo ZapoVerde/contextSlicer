@@ -1,8 +1,6 @@
 version: 1
 project:
-  # Point two levels up to the monorepo root
   targetProjectRoot: ../../
-
 sanitation:
   maxUploadSizeMb: 500
   acceptedExtensions:
@@ -15,11 +13,11 @@ sanitation:
     - md
     - html
     - css
+    - yml
   denyPatterns:
     - .git
     - node_modules
     - dist
     - .idx
     - .pnpm-store
-    # Ignore the output cache so we don't scan our own dumps
     - packages/desktop/public/source-dump
