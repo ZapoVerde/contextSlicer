@@ -1,0 +1,45 @@
+{
+  "name": "@slicer/desktop",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "bin": "dist/server/index.js",
+  "scripts": {
+    "dev": "concurrently \"tsx --watch server/index.ts\" \"vite\"",
+    "build:ui": "vite build --outDir dist/public",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --target=node18 --outfile=dist/server/index.js --format=cjs --define:import.meta.url=undefined",
+    "package": "pnpm build:ui && pnpm build:server && pkg . --out-path release --targets node18-linux-x64,node18-win-x64",
+    "clean": "rm -rf dist release"
+  },
+  "pkg": {
+    "assets": [
+      "dist/public/**/*"
+    ],
+    "outputPath": "release"
+  },
+  "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^7.3.5",
+    "@mui/material": "^7.3.5",
+    "@slicer/core": "workspace:*",
+    "chokidar": "^4.0.3",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "ignore": "^7.0.5",
+    "istextorbinary": "^9.5.0",
+    "js-yaml": "^4.1.1",
+    "open": "^8.4.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@vitejs/plugin-react-swc": "^3.11.0",
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.27.0",
+    "pkg": "^5.8.1",
+    "tsx": "^4.20.6",
+    "vite": "^7.2.4"
+  }
+}

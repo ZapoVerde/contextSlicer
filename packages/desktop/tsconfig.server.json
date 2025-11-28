@@ -1,0 +1,15 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+      // FORCE CommonJS modules for the server build
+      "module": "CommonJS",
+      "moduleResolution": "Node",
+      "outDir": "dist/server",
+      "rootDir": "server",
+      "noEmit": false,
+      "sourceMap": false,
+      "allowImportingTsExtensions": false,
+      "esModuleInterop": true
+    },
+    "include": ["server/**/*"]
+  }

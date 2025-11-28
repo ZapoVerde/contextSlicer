@@ -1,0 +1,23 @@
+version: 1
+project:
+  targetProjectRoot: ../../
+sanitation:
+  maxUploadSizeMb: 500
+  acceptedExtensions:
+    - ts
+    - tsx
+    - js
+    - jsx
+    - json
+    - yaml
+    - md
+    - html
+    - css
+    - yml
+  denyPatterns:
+    - .git
+    - node_modules
+    - dist
+    - .idx
+    - .pnpm-store
+    - packages/desktop/public/source-dump

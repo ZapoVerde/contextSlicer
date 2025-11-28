@@ -1,0 +1,29 @@
+{
+  "name": "@slicer/core",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.28.5",
+    "@babel/traverse": "^7.28.5",
+    "@babel/types": "^7.28.5",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^7.3.5",
+    "@mui/material": "^7.3.5",
+    "ignore": "^7.0.5",
+    "js-yaml": "^4.1.1",
+    "jszip": "^3.10.1",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/babel__traverse": "^7.20.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}
