@@ -10,9 +10,9 @@
 
 ---
 
-> **For developers using LLMs on large JS/TS codebases.**
->
-> When your project grows beyond a few dozen files, providing context to an AI becomes a bottleneck. Pasting your whole repo is impossible. Manually hunting down every relevant file for a single task is slow and error-prone.
+**For developers using LLMs on large JS/TS codebases.**
+
+When your project grows beyond a few dozen files, providing context to an AI becomes a bottleneck. Pasting your whole repo is impossible. Manually hunting down every relevant file for a single task is slow and error-prone.
 
 **Context Slicer automates that hunt.**
 
