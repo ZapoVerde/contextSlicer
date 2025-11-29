@@ -1,23 +1,24 @@
 /**
  * @file packages/core/src/logic/symbolGraph/astParser.ts
+ * @stamp {"ts":"2025-11-29T03:40:00Z"}
  * @architectural-role Orchestrator
  *
- * @description This module orchestrates the entire multi-pass process of building the
- * symbol dependency graph. It imports the logic for each pass from dedicated modules
- * and executes them in the correct sequence.
+ * @description
+ * Orchestrates the multi-pass symbol graph generation process.
+ * Acts as the bridge between the raw file index and the specific logic passes.
  *
- * @responsibilities
- * 1.  **Process Orchestration:** Defines the high-level sequence of the build process:
- *     - Pass 1: Build the AST cache.
- *     - Pass 2: Discover all symbol and file nodes.
- *     - Pass 3: Link the nodes by resolving dependencies.
- * 2.  **Data Flow Management:** It manages the flow of data between the passes,
- *     taking the output from one pass (like the `astCache`) and providing it as
- *     input to the subsequent passes.
- * 3.  **Encapsulation:** It encapsulates the complexity of the multi-pass architecture,
- *     providing a single, simple function (`runASTParser`) to the rest of the
- *     application.
+ * @core-principles
+ * 1. OWNS the execution sequence of the graph building passes.
+ * 2. MANAGES the flow of data (AST Cache, Graph) between passes.
+ * 3. DELEGATES specific analysis logic to sub-modules.
+ *
+ * @contract
+ *   assertions:
+ *     purity: mutates # Modifies the graph object passed by reference.
+ *     state_ownership: none
+ *     external_io: none
  */
+
 import type { FileEntry, SymbolGraph } from './types';
 import { PathResolver } from './pathResolver';
 
@@ -28,9 +29,9 @@ import { linkDependencies } from './passes/3_linkDependencies';
 
 /**
  * The main orchestrator function that runs the multi-pass graph building process.
- * @param fileIndex - The global map of all file entries from the zip.
+ * @param fileIndex - The global map of all file entries.
  * @param pathResolver - The utility for resolving module paths.
- * @param graph - The graph instance to be populated. This function mutates the graph. 
+ * @param graph - The graph instance to be populated (mutation target).
  * @param errors - A collection to push error messages into.
  */
 export async function runASTParser(
@@ -43,7 +44,9 @@ export async function runASTParser(
   const astCache = await buildAstCache(fileIndex);
 
   // Pass 2: Traverse the ASTs to find all symbols and create nodes in the graph.
-  discoverSymbols(astCache, graph);
+  // Now accepts 'errors' to report files that couldn't be traversed.
+  // FIX: Must pass 'errors' as the 3rd argument.
+  discoverSymbols(astCache, graph, errors);
 
   // Pass 3: Traverse the ASTs again to find imports and link the nodes together.
   linkDependencies(astCache, graph, pathResolver, errors);

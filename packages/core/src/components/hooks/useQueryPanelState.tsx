@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState.tsx
- * @stamp {"ts":"2025-11-24T09:45:00Z"}
+ * @stamp {"ts":"2025-11-28T15:35:00Z"}
  * @architectural-role Custom Hook / State & Logic Controller
  *
  * @description
@@ -13,6 +13,7 @@
  * 1. IS the brain of the Query Panel UI, owning all transient form state.
  * 2. ORCHESTRATES complex query operations (tracing, wildcard matching) by delegating to pure logic modules.
  * 3. DECOUPLES the presentation layer (UI components) from the global store implementation.
+ * 4. ENFORCES graceful degradation: if the Symbol Graph fails, file selection must still work.
  *
  * @contract
  *   assertions:
@@ -36,6 +37,8 @@ export function useQueryPanelState() {
   // Global State Selectors
   const fileIndex = useSlicerStore((state) => state.fileIndex);
   const symbolGraph = useSlicerStore((state) => state.symbolGraph);
+  const graphStatus = useSlicerStore((state) => state.graphStatus);
+  const resolutionErrors = useSlicerStore((state) => state.resolutionErrors);
   const ensureSymbolGraph = useSlicerStore((state) => state.ensureSymbolGraph);
   const targetedPathsInput = useSlicerStore((state) => state.targetedPathsInput);
   const setTargetedPathsInput = useSlicerStore((state) => state.setTargetedPathsInput);
@@ -55,12 +58,24 @@ export function useQueryPanelState() {
   // Derived State
   const docsFolders = useMemo(() => discoverDocsFolders(fileIndex), [fileIndex]);
 
+  // Robust Option Generation: Works even if SymbolGraph is broken
   const symbolOptions = useMemo(() => {
-    if (!symbolGraph) return [];
-    const options = new Set<string>(Array.from(symbolGraph.keys()));
+    const options = new Set<string>();
+    
+    // 1. Always available if files are loaded
     if (fileIndex) {
-      fileIndex.forEach((_, key) => options.add(key));
+      for (const key of fileIndex.keys()) {
+        options.add(key);
+      }
     }
+
+    // 2. Only available if graph is healthy
+    if (symbolGraph) {
+      for (const key of symbolGraph.keys()) {
+        options.add(key);
+      }
+    }
+    
     return Array.from(options).sort();
   }, [symbolGraph, fileIndex]);
 
@@ -132,18 +147,23 @@ export function useQueryPanelState() {
           Array.from(seedPaths).map(p => p.split('#')[0])
         );
 
-        // 4. Perform Dependency Trace
+        // 4. Perform Dependency Trace (Graceful Fallback)
+        let traceWarning = '';
         if (traceDepth > 0 && seedPaths.size > 0) {
+          // Attempt to build graph if not ready
           await ensureSymbolGraph();
-          // Re-fetch graph from store as it might have just been built
+          
+          // Re-fetch fresh state
           const graph = useSlicerStore.getState().symbolGraph;
-          if (!graph) {
-            throw new Error('Symbol graph is not available for tracing.');
-          }
-
-          for (const startNode of seedPaths) {
-            const tracedPaths = traceSymbolGraph(graph, startNode, traceDirection, traceDepth);
-            tracedPaths.forEach(p => inclusionPaths.add(p));
+          
+          if (graph) {
+            for (const startNode of seedPaths) {
+              const tracedPaths = traceSymbolGraph(graph, startNode, traceDirection, traceDepth);
+              tracedPaths.forEach(p => inclusionPaths.add(p));
+            }
+          } else {
+            traceWarning = ' (Tracing skipped: Graph unavailable)';
+            console.warn('Symbol graph unavailable. Only seed files included.');
           }
         }
 
@@ -174,7 +194,7 @@ export function useQueryPanelState() {
 
         setTargetedPathsInput(combinedPaths.join(', '));
         setSuccessMessage(
-          `✅ ${mode === 'append' ? 'Appended' : 'Replaced with'} ${finalPaths.length} file(s).`
+          `✅ ${mode === 'append' ? 'Appended' : 'Replaced with'} ${finalPaths.length} file(s)${traceWarning}.`
         );
         setTimeout(() => setSuccessMessage(''), 4000);
       } catch (e: unknown) {
@@ -217,6 +237,8 @@ export function useQueryPanelState() {
     docsFolders,
     checkedDocsFolders,
     presets,
+    graphStatus,
+    resolutionErrors,
 
     // State setters
     setTraceQuery,

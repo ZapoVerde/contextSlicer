@@ -1,24 +1,24 @@
 /**
  * @file packages/core/src/components/ContextQueryPanel.tsx
- * @stamp {"ts":"2025-10-03T01:34:00Z"}
+ * @stamp {"ts":"2025-11-29T03:50:00Z"}
  * @architectural-role UI Component / Dynamic Workflow Orchestrator
  *
  * @description
  * This component is the central user interface for building a context pack. It has
- * been refactored to be configuration-driven. Instead of containing hardcoded
- * actions, it now dynamically renders a set of "Preset" buttons by reading the
- * `presets` array from the `slicerConfig` object in the central state store.
- * This ensures the UI is always a direct reflection of the currently loaded
- * application configuration.
+ * been refactored to be configuration-driven and resilient to graph failures.
  *
- * @responsibilities
- * 1.  **State Consumption:** Consumes all necessary state, setters, and actions
- *     from the `useQueryPanelState` custom hook.
- * 2.  **Dynamic Rendering:** Iterates over the `presets` array provided by the
- *     hook to dynamically generate the UI for the preset actions.
- * 3.  **Component Orchestration:** Assembles the various input panels and action
- *     buttons into a cohesive, multi-step workflow for the user.
+ * @core-principles
+ * 1. ORCHESTRATES the user workflow for selecting context.
+ * 2. DISPLAYS actionable feedback (warnings/errors) from the analysis engine.
+ * 3. DELEGATES complex logic to the `useQueryPanelState` hook.
+ *
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     state_ownership: none
+ *     external_io: none
  */
+
 import React from 'react';
 import {
   Paper,
@@ -35,11 +35,14 @@ import {
   FormControlLabel,
   Radio,
   Slider,
+  Alert,
+  AlertTitle
 } from '@mui/material';
 import { useQueryPanelState } from './hooks/useQueryPanelState';
 import { DependencyTracePanel } from './DependencyTracePanel';
 import { WildcardSearchPanel } from './WildcardSearchPanel';
 import { DocsFolderPanel } from './DocsFolderPanel';
+import { GraphWarnings } from './GraphWarnings';
 
 export const ContextQueryPanel: React.FC = () => {
   const {
@@ -58,7 +61,8 @@ export const ContextQueryPanel: React.FC = () => {
     docsFolders,
     checkedDocsFolders,
     presets,
-    
+    graphStatus,
+    resolutionErrors,
 
     // State setters
     setTraceQuery,
@@ -80,6 +84,20 @@ export const ContextQueryPanel: React.FC = () => {
       <Typography variant="h6" gutterBottom>
         Context Query Tools
       </Typography>
+
+      {/* CRITICAL FAILURE ALERT */}
+      {graphStatus === 'error' && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <AlertTitle>Dependency Graph Unavailable</AlertTitle>
+          Tracing features are disabled. You can still select files manually or via wildcards.
+        </Alert>
+      )}
+
+      {/* PARTIAL SUCCESS WARNINGS */}
+      {graphStatus === 'ready' && resolutionErrors.length > 0 && (
+        <GraphWarnings warnings={resolutionErrors} />
+      )}
+
       <Box sx={{ my: 2 }}>
         <Divider>
           <Typography variant="overline" color="text.secondary">
@@ -87,7 +105,6 @@ export const ContextQueryPanel: React.FC = () => {
           </Typography>
         </Divider>
         <Stack direction="row" spacing={1} sx={{ mt: 1, mb: 2 }} alignItems="center" flexWrap="wrap">
-          {/* --- Dynamically render preset buttons --- */}
           {presets.map(preset => (
             <Button
               key={preset.id}
@@ -175,7 +192,7 @@ export const ContextQueryPanel: React.FC = () => {
               max={10}
               valueLabelDisplay="auto"
               marks
-              disabled={isDisabled}
+              disabled={isDisabled || graphStatus !== 'ready'}
             />
           </Box>
         </Stack>
@@ -193,9 +210,6 @@ export const ContextQueryPanel: React.FC = () => {
           intent="exclusion"
         />
       </Box>
-
-      {/* --- The Presets and ButtonGroup sections were moved from here --- */}
-
     </Paper>
   );
 };
