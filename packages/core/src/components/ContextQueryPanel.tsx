@@ -1,17 +1,24 @@
 /**
  * @file packages/core/src/components/ContextQueryPanel.tsx
- * @stamp {"ts":"2025-11-28T15:40:00Z"}
+ * @stamp {"ts":"2025-11-29T03:50:00Z"}
  * @architectural-role UI Component / Dynamic Workflow Orchestrator
  *
  * @description
  * This component is the central user interface for building a context pack. It has
  * been refactored to be configuration-driven and resilient to graph failures.
  *
- * @responsibilities
- * 1.  **State Consumption:** Consumes all necessary state from `useQueryPanelState`.
- * 2.  **Feedback:** Displays warnings if the dependency graph fails to load.
- * 3.  **Component Orchestration:** Assembles the input panels and action buttons.
+ * @core-principles
+ * 1. ORCHESTRATES the user workflow for selecting context.
+ * 2. DISPLAYS actionable feedback (warnings/errors) from the analysis engine.
+ * 3. DELEGATES complex logic to the `useQueryPanelState` hook.
+ *
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     state_ownership: none
+ *     external_io: none
  */
+
 import React from 'react';
 import {
   Paper,
@@ -35,6 +42,7 @@ import { useQueryPanelState } from './hooks/useQueryPanelState';
 import { DependencyTracePanel } from './DependencyTracePanel';
 import { WildcardSearchPanel } from './WildcardSearchPanel';
 import { DocsFolderPanel } from './DocsFolderPanel';
+import { GraphWarnings } from './GraphWarnings';
 
 export const ContextQueryPanel: React.FC = () => {
   const {
@@ -77,17 +85,17 @@ export const ContextQueryPanel: React.FC = () => {
         Context Query Tools
       </Typography>
 
-      {/* GRAPH ERROR ALERT */}
+      {/* CRITICAL FAILURE ALERT */}
       {graphStatus === 'error' && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
           <AlertTitle>Dependency Graph Unavailable</AlertTitle>
-          Tracing features are temporarily disabled. You can still select files manually or via wildcards.
-          {resolutionErrors.length > 0 && (
-            <Box component="pre" sx={{ fontSize: '0.7rem', mt: 1, maxHeight: 100, overflow: 'auto', p: 1, bgcolor: 'rgba(0,0,0,0.05)' }}>
-              {resolutionErrors[0]}
-            </Box>
-          )}
+          Tracing features are disabled. You can still select files manually or via wildcards.
         </Alert>
+      )}
+
+      {/* PARTIAL SUCCESS WARNINGS */}
+      {graphStatus === 'ready' && resolutionErrors.length > 0 && (
+        <GraphWarnings warnings={resolutionErrors} />
       )}
 
       <Box sx={{ my: 2 }}>
