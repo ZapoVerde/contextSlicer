@@ -1,17 +1,17 @@
 /**
  * @file packages/core/src/components/ContextQueryPanel.tsx
- * @stamp {"ts":"2025-11-29T03:50:00Z"}
- * @architectural-role UI Component / Dynamic Workflow Orchestrator
- *
+ * @stamp {"ts":"2026-02-14T08:35:00Z"}
+ * @architectural-role UI Component
  * @description
- * This component is the central user interface for building a context pack. It has
- * been refactored to be configuration-driven and resilient to graph failures.
- *
+ * The central user interface for building context packs. Enhanced with logical 
+ * tracing controls (Smart Trace) and passive file output configuration to 
+ * maximize token efficiency.
+ * 
  * @core-principles
  * 1. ORCHESTRATES the user workflow for selecting context.
- * 2. DISPLAYS actionable feedback (warnings/errors) from the analysis engine.
- * 3. DELEGATES complex logic to the `useQueryPanelState` hook.
- *
+ * 2. ENFORCES the separation of seed definition from logical expansion.
+ * 3. DELEGATES state and trace logic to the useQueryPanelState hook.
+ * 
  * @contract
  *   assertions:
  *     purity: pure
@@ -36,8 +36,14 @@ import {
   Radio,
   Slider,
   Alert,
-  AlertTitle
+  AlertTitle,
+  Switch,
+  Select,
+  MenuItem,
+  InputLabel,
+  Tooltip,
 } from '@mui/material';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { useQueryPanelState } from './hooks/useQueryPanelState';
 import { DependencyTracePanel } from './DependencyTracePanel';
 import { WildcardSearchPanel } from './WildcardSearchPanel';
@@ -50,6 +56,8 @@ export const ContextQueryPanel: React.FC = () => {
     traceQuery,
     traceDirection,
     traceDepth,
+    traceMode,
+    passiveOutputMode,
     wildcardQuery,
     isLoading,
     error,
@@ -68,6 +76,8 @@ export const ContextQueryPanel: React.FC = () => {
     setTraceQuery,
     setTraceDirection,
     setTraceDepth,
+    setTraceMode,
+    setPassiveOutputMode,
     setWildcardQuery,
     setExclusionWildcardQuery,
     handleDocsFolderToggle,
@@ -80,7 +90,7 @@ export const ContextQueryPanel: React.FC = () => {
   const isDisabled = !isReady || isLoading;
 
   return (
-    <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+    <Paper variant="outlined" sx={styles.root}>
       <Typography variant="h6" gutterBottom>
         Context Query Tools
       </Typography>
@@ -137,7 +147,7 @@ export const ContextQueryPanel: React.FC = () => {
       </Box>
 
       {/* STEP 1: Define the Seed Files */}
-      <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, borderRadius: 1, mb: 2 }}>
+      <Box sx={styles.sectionContainer}>
         <Typography variant="overline" display="block" color="text.secondary" sx={{ mb: 1 }}>
           Step 1: Define Seed Files
         </Typography>
@@ -163,43 +173,85 @@ export const ContextQueryPanel: React.FC = () => {
       </Box>
 
       {/* STEP 2: Expand the Selection */}
-      <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, borderRadius: 1, mb: 2 }}>
+      <Box sx={styles.sectionContainer}>
         <Typography variant="overline" display="block" color="text.secondary">
           Step 2: Expand with Dependencies (Optional)
         </Typography>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={4} alignItems="center" sx={{ mt: 1, px: 1 }}>
-          <FormControl>
-            <FormLabel sx={{ fontSize: '0.8rem', mb: 1 }}>Trace Direction</FormLabel>
-            <RadioGroup
-              row
-              value={traceDirection}
-              onChange={e => setTraceDirection(e.target.value as 'dependencies' | 'dependents' | 'both')}
-            >
-              <FormControlLabel value="dependencies" control={<Radio size="small" />} label="Dependencies" />
-              <FormControlLabel value="dependents" control={<Radio size="small" />} label="Dependents" />
-              <FormControlLabel value="both" control={<Radio size="small" />} label="Both" />
-            </RadioGroup>
-          </FormControl>
-          <Box sx={{ flex: 1, width: '100%', maxWidth: 400 }}>
-            <Typography gutterBottom sx={{ fontSize: '0.8rem' }}>
-              Hops (0 = no trace)
-            </Typography>
-            <Slider
-              value={traceDepth}
-              onChange={(_, val) => setTraceDepth(val as number)}
-              step={1}
-              min={0}
-              max={10}
-              valueLabelDisplay="auto"
-              marks
+        
+        <Stack spacing={3} sx={{ mt: 2, px: 1 }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={4} alignItems="center">
+            <FormControl>
+              <FormLabel sx={styles.formLabel}>Trace Direction</FormLabel>
+              <RadioGroup
+                row
+                value={traceDirection}
+                onChange={e => setTraceDirection(e.target.value as any)}
+              >
+                <FormControlLabel value="dependencies" control={<Radio size="small" />} label="Deps" />
+                <FormControlLabel value="dependents" control={<Radio size="small" />} label="Users" />
+                <FormControlLabel value="both" control={<Radio size="small" />} label="Both" />
+              </RadioGroup>
+            </FormControl>
+
+            <Box sx={{ flex: 1, width: '100%', maxWidth: 400 }}>
+              <Typography gutterBottom sx={styles.formLabel}>
+                Hops (0 = no trace)
+              </Typography>
+              <Slider
+                value={traceDepth}
+                onChange={(_, val) => setTraceDepth(val as number)}
+                step={1}
+                min={0}
+                max={10}
+                valueLabelDisplay="auto"
+                marks
+                disabled={isDisabled || graphStatus !== 'ready'}
+              />
+            </Box>
+          </Stack>
+
+          <Divider />
+
+          {/* NEW: LOGICAL TRACING CONTROLS */}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} alignItems="flex-end">
+            <FormControlLabel
+              control={
+                <Switch 
+                  checked={traceMode === 'logical'} 
+                  onChange={(e) => setTraceMode(e.target.checked ? 'logical' : 'physical')}
+                  color="primary"
+                />
+              }
+              label={
+                <Stack direction="row" alignItems="center" spacing={0.5}>
+                  <Typography variant="body2">Smart Trace (Bypass Pipes)</Typography>
+                  <Tooltip title="When ON, index files and pure passthrough components do not consume hops.">
+                    <InfoOutlinedIcon sx={{ fontSize: '1rem', color: 'text.secondary' }} />
+                  </Tooltip>
+                </Stack>
+              }
               disabled={isDisabled || graphStatus !== 'ready'}
             />
-          </Box>
+
+            <FormControl size="small" sx={{ minWidth: 200 }} disabled={isDisabled || traceMode !== 'logical'}>
+              <InputLabel id="passive-mode-label">Passive File Detail</InputLabel>
+              <Select
+                labelId="passive-mode-label"
+                value={passiveOutputMode}
+                label="Passive File Detail"
+                onChange={(e) => setPassiveOutputMode(e.target.value as any)}
+              >
+                <MenuItem value="full">Full Content</MenuItem>
+                <MenuItem value="docblock">Docblocks Only</MenuItem>
+                <MenuItem value="meta">Metadata Only (Bypass)</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
         </Stack>
       </Box>
 
       {/* STEP 3: Exclusion (Sieve) */}
-      <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, borderRadius: 1 }}>
+      <Box sx={styles.sectionContainer}>
         <Typography variant="overline" display="block" color="text.secondary">
           Step 3: Exclude Files (Optional)
         </Typography>
@@ -213,3 +265,21 @@ export const ContextQueryPanel: React.FC = () => {
     </Paper>
   );
 };
+
+const styles = {
+  root: {
+    p: 2,
+    mt: 2,
+  },
+  sectionContainer: {
+    border: '1px solid',
+    borderColor: 'divider',
+    p: 2,
+    borderRadius: 1,
+    mb: 2,
+  },
+  formLabel: {
+    fontSize: '0.8rem',
+    mb: 1,
+  },
+} as const;

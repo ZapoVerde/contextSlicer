@@ -1,19 +1,26 @@
 /**
  * @file packages/core/src/logic/symbolGraph/astUtils.ts
- * @architectural-role Logic Utility / AST Helpers
- *
- * @description This module provides a collection of helper functions for working with
- * Abstract Syntax Trees (ASTs). It encapsulates complex, reusable logic, such as
- * recursively resolving the origin of an exported symbol.
- *
- * @responsibilities
- * 1.  **Export Resolution:** Contains the `resolveExport` function, which is the most
- *     complex helper. It traverses the ASTs of multiple files to trace a named export
- *     back to its original declaration, handling re-exports (`export * from ...`) and
- *     named re-exports (`export { a } from ...`).
- * 2.  **Identifier Handling:** Provides smaller utility functions, like `getIdentifierName`,
- *     to safely extract the name from different types of AST nodes.
+ * @stamp {"ts":"2026-02-14T07:18:00Z"}
+ * @architectural-role Utility
+ * @description
+ * Shared utility functions for navigating and analyzing Babel Abstract Syntax Trees.
+ * Provides helpers for identifier extraction and cross-file export resolution.
+ * 
+ * @core-principles
+ * 1. IS a collection of stateless, pure helper functions.
+ * 2. OWNS the complexity of AST node type discrimination.
+ * 3. MUST NOT maintain any internal state or perform I/O.
+ * 
+ * @api-declaration
+ *   export function getIdentifierName(node: Node): string;
+ *   export function resolveExport(...): string | null;
+ * 
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     external_io: none
  */
+
 import traverse, { NodePath } from '@babel/traverse';
 import type {
   Node,
@@ -26,18 +33,26 @@ import type {
   TSTypeAliasDeclaration,
   VariableDeclarator,
   Identifier,
+  StringLiteral,
 } from '@babel/types';
 import { PathResolver } from './pathResolver';
 
 type AstCache = Map<string, Node>;
 
-function getIdentifierName(node: Identifier | import('@babel/types').StringLiteral): string {
+/**
+ * @id packages/core/src/logic/symbolGraph/astUtils.ts#getIdentifierName
+ * @description
+ * Safely extracts a string name from an Identifier or StringLiteral node.
+ */
+export function getIdentifierName(node: Identifier | StringLiteral): string {
   return node.type === 'Identifier' ? node.name : node.value;
 }
 
 /**
- * Recursively traces an export to its original declaration across multiple files.
- * @returns The final symbol ID (e.g., 'path/to/origin.ts#symbolName') or null.
+ * @id packages/core/src/logic/symbolGraph/astUtils.ts#resolveExport
+ * @description
+ * Recursively traces an export back to its original declaration across the AST cache.
+ * Handles re-exports and wildcard exports.
  */
 export function resolveExport(
   targetPath: string,
@@ -48,7 +63,7 @@ export function resolveExport(
   visited = new Set<string>()
 ): string | null {
   const cacheKey = `${targetPath}#${symbolName}`;
-  if (visited.has(cacheKey)) return null; // Avoid circular dependency loops
+  if (visited.has(cacheKey)) return null; 
   visited.add(cacheKey);
 
   const ast = astCache.get(targetPath);
@@ -56,16 +71,15 @@ export function resolveExport(
 
   let foundOrigin: string | null = null;
 
-  // Look for re-exports (e.g., `export { MyClass } from './MyClass'`)
   traverse(ast, {
     ExportNamedDeclaration(path: NodePath<ExportNamedDeclaration>) {
       if (path.node.source) {
-          const sourcePath = pathResolver.resolve(targetPath, path.node.source.value, errors);
+        const sourcePath = pathResolver.resolve(targetPath, path.node.source.value, errors);
         if (sourcePath) {
           for (const specifier of path.node.specifiers) {
             if (
               specifier.type === 'ExportSpecifier' &&
-              getIdentifierName(specifier.exported) === symbolName
+              getIdentifierName(specifier.exported as Identifier) === symbolName
             ) {
               foundOrigin = resolveExport(
                 sourcePath,
@@ -81,7 +95,6 @@ export function resolveExport(
         }
       }
     },
-    // Look for wildcard re-exports (e.g., `export * from './components'`)
     ExportAllDeclaration(path: NodePath<ExportAllDeclaration>) {
       const sourcePath = pathResolver.resolve(targetPath, path.node.source.value, errors);
       if (sourcePath) {
@@ -97,7 +110,6 @@ export function resolveExport(
     return foundOrigin;
   }
 
-  // If not re-exported, check if it's declared locally in this file.
   let isDeclaredLocally = false;
   const declarationVisitor = (
     path: NodePath<
