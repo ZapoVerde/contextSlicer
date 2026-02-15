@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/useQueryState.ts
- * @stamp {"ts":"2026-02-14T15:55:00Z"}
+ * @stamp {"ts":"2026-02-15T01:00:00Z"}
  * @architectural-role State Logic
  * @description
  * Manages the primitive UI state for the Context Query Panel. This internal hook 
@@ -27,14 +27,17 @@ import type { TraceDirection, QueryPanelState } from './types';
  * @id packages/core/src/components/hooks/useQueryPanelState/useQueryState.ts#useQueryState
  * @description
  * Initializes and manages all local state variables required by the Query Panel.
+ * Defaults are set to provide a tight initial context gradient (1:2).
  */
 export function useQueryState() {
   const [traceQuery, setTraceQuery] = useState<string | null>(null);
   const [traceDirection, setTraceDirection] = useState<TraceDirection>('both');
   
   // Resolution Boundaries
+  // Defaulting to 1 hop for Full Extraction (Seed + Direct Neighbors)
   const [traceDepth, setTraceDepth] = useState<number>(1);
-  const [summaryTraceDepth, setSummaryTraceDepth] = useState<number>(1);
+  // Defaulting to 2 hops for Summary extraction (Distant Neighbors)
+  const [summaryTraceDepth, setSummaryTraceDepth] = useState<number>(2);
   
   const [traceMode, setTraceMode] = useState<TraceMode>('logical');
   const [passiveOutputMode, setPassiveOutputMode] = useState<PassiveOutputMode>('meta');

@@ -1,11 +1,12 @@
 /**
  * @file packages/core/src/components/ContextQueryPanel/ExpansionControls.tsx
- * @stamp {"ts":"2026-02-14T17:05:00Z"}
+ * @stamp {"ts":"2026-02-15T09:40:00Z"}
  * @architectural-role UI Component
  * @description
  * Renders the dependency expansion controls (Step 2). Features a dual-handle 
  * slider to define the resolution gradient between full implementation text 
- * and semantic architectural summaries.
+ * and semantic architectural summaries. Updated with strict layout constraints
+ * to prevent flexbox overflow.
  *
  * @core-principles
  * 1. IS responsible for UI controls that expand the context seed.
@@ -114,13 +115,13 @@ export const ExpansionControls: React.FC<ExpansionControlsProps> = ({
               <FormControlLabel 
                 value="dependencies" 
                 control={<Radio size="small" />} 
-                label="Deps" 
+                label="Upstream" 
                 disabled={isDisabled || !isGraphReady}
               />
               <FormControlLabel 
                 value="dependents" 
                 control={<Radio size="small" />} 
-                label="Users" 
+                label="Downstream" 
                 disabled={isDisabled || !isGraphReady}
               />
               <FormControlLabel 
@@ -132,12 +133,18 @@ export const ExpansionControls: React.FC<ExpansionControlsProps> = ({
             </RadioGroup>
           </FormControl>
 
-          <Box sx={{ flex: 1, width: '100%', maxWidth: 500 }}>
+          {/* 
+            LAYOUT FIX: 
+            flex: '1 1 0' and minWidth: 0 are critical here.
+            Without minWidth: 0, the Slider's intrinsic width calculation can force 
+            the flex item to overflow its parent in certain browser engines.
+          */}
+          <Box sx={{ flex: '1 1 0', minWidth: 0, width: '100%', maxWidth: 500 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
               <Typography sx={styles.formLabel}>
                 Resolution Gradient (Hops)
               </Typography>
-              <Tooltip title="Handle 1 sets the Full Extraction limit. Handle 2 sets the Summary limit. Files between them are summarized.">
+              <Tooltip title="Handle 1: Full Code limit. Handle 2: Summary limit. Files beyond Handle 2 are excluded from the pack logic but mapped in the Boundary Library.">
                 <InfoOutlinedIcon sx={{ fontSize: '0.9rem', color: 'text.secondary' }} />
               </Tooltip>
             </Stack>
@@ -151,20 +158,23 @@ export const ExpansionControls: React.FC<ExpansionControlsProps> = ({
               valueLabelDisplay="auto"
               marks={[
                 { value: 0, label: 'Seed' },
+                { value: 2, label: 'Neighbors' },
+                { value: 5, label: 'Distant' },
                 { value: 10, label: 'Deep' }
               ]}
               disabled={isDisabled || !isGraphReady}
               disableSwap
+              sx={sliderStyles}
             />
             
             <Stack direction="row" spacing={2} mt={1} justifyContent="center">
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Box sx={{ width: 12, height: 12, bgcolor: 'primary.main', borderRadius: '50%' }} />
-                <Typography variant="caption" color="text.secondary">Full Code (Hops 0-{traceDepth})</Typography>
+                <Box sx={{ width: 12, height: 12, bgcolor: 'primary.main', borderRadius: '2px' }} />
+                <Typography variant="caption" color="text.secondary">Full Code (0-{traceDepth})</Typography>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Box sx={{ width: 12, height: 12, bgcolor: 'action.disabled', borderRadius: '50%' }} />
-                <Typography variant="caption" color="text.secondary">Summaries (Hops {traceDepth + 1}-{summaryTraceDepth})</Typography>
+                <Box sx={{ width: 12, height: 12, bgcolor: 'action.selected', borderRadius: '2px' }} />
+                <Typography variant="caption" color="text.secondary">Summaries ({traceDepth + 1}-{summaryTraceDepth})</Typography>
               </Box>
             </Stack>
           </Box>
@@ -172,7 +182,6 @@ export const ExpansionControls: React.FC<ExpansionControlsProps> = ({
 
         <Divider />
 
-        {/* LOGICAL TRACING CONTROLS */}
         <Box sx={styles.logicalControlContainer}>
           <FormControlLabel
             control={
@@ -185,7 +194,7 @@ export const ExpansionControls: React.FC<ExpansionControlsProps> = ({
             label={
               <Stack direction="row" alignItems="center" spacing={0.5}>
                 <Typography variant="body2">Smart Trace (Bypass Pipes)</Typography>
-                <Tooltip title="When ON, index files and pure passthrough components do not consume hops.">
+                <Tooltip title="When ON, index files and pure re-export components (barrels) do not consume hops.">
                   <InfoOutlinedIcon sx={{ fontSize: '1rem', color: 'text.secondary' }} />
                 </Tooltip>
               </Stack>
@@ -215,3 +224,29 @@ export const ExpansionControls: React.FC<ExpansionControlsProps> = ({
     </Box>
   );
 };
+
+/**
+ * Extracted styling for the Gradient Slider to visualize resolution zones.
+ * Updated to ensure visual containment and correct track rendering.
+ */
+const sliderStyles = {
+  height: 6,
+  padding: '13px 0', // Ensure touch target doesn't overflow
+  '& .MuiSlider-track': {
+    border: 'none',
+    backgroundColor: 'primary.main',
+  },
+  '& .MuiSlider-rail': {
+    opacity: 0.3,
+    backgroundColor: 'text.primary', // Clearer contrast for the rail
+  },
+  '& .MuiSlider-mark': {
+    backgroundColor: '#bfbfbf',
+    height: 8,
+    width: 2, // Slightly thicker marks for visibility
+    '&.MuiSlider-markActive': {
+      opacity: 1,
+      backgroundColor: 'currentColor',
+    },
+  },
+} as const;
