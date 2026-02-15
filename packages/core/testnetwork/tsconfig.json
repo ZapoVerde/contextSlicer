@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@prism/shared-types/*": ["packages/shared-types/*"],
+      "@prism/ui-kit/*": ["packages/ui-kit/*"],
+      "@prism/web/*": ["packages/web/*"]
+    }
+  }
+}
