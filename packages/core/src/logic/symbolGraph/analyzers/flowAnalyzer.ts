@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/logic/symbolGraph/analyzers/flowAnalyzer.ts
- * @stamp {"ts":"2026-02-14T17:45:00Z"}
+ * @stamp {"ts":"2026-02-15T19:00:00Z"}
  * @architectural-role Business Logic
  * @description
  * Implements the "Scent-Sensitive" flow analysis heuristic. Evaluates whether a 
  * specific identifier interacts meaningfully within a file or simply passes 
- * through, while tracking identifier renaming (aliasing). Now includes debug reasons.
+ * through, while tracking identifier renaming (aliasing).
  * 
  * @core-principles
  * 1. IS responsible for identifier-level lifecycle tracking.
@@ -81,21 +81,32 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
       }
     },
 
-    // 2. Detect Usage / Interactions
+    // 2. Detect Component Rendering (JSX Tags)
+    // <MyComponent /> uses JSXIdentifier, not standard Identifier
+    JSXIdentifier(path) {
+      if (path.node.name !== targetIdentifier) return;
+
+      // Check if this identifier is the Tag Name of an opening element
+      if (path.parentPath.isJSXOpeningElement() && path.key === 'name') {
+        interactionCount++;
+        reasons.push('JSX Component Render');
+      }
+    },
+
+    // 3. Detect Usage / Interactions (Standard Identifiers)
     Identifier(path) {
       if (path.node.name !== targetIdentifier) return;
 
       // --- EXCLUSIONS (Pass-throughs / Pipes) ---
 
       // A: Incoming Function Parameters
-      if (path.listKey === 'params' || path.key === 'param') return; // function(user) or catch(user)
+      if (path.listKey === 'params' || path.key === 'param') return; 
       
       // Destructured params: function({ user })
       if (path.parentPath.isObjectProperty() && path.key === 'value') {
          const grandParent = path.parentPath.parentPath;
          if (grandParent?.isObjectPattern()) {
            const greatGrandParent = grandParent.parentPath;
-           // Check if object pattern is in params list
            if (greatGrandParent?.isFunction() && greatGrandParent.node.params.includes(grandParent.node as any)) {
              return; 
            }
@@ -116,10 +127,9 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
 
       // D: Destructuring without rename: const { user } = props;
       if (path.parentPath.isObjectProperty()) {
-         // If shorthand, it's a pass-through extraction
          if (path.parentPath.node.shorthand) return;
+         
          // If it is the key in { user: user }, and value matches, it's pass-through
-         // Note: we are strictly looking for matching identifiers.
          if (path.key === 'value' &&
              path.parentPath.node.key.type === 'Identifier' && 
              path.parentPath.node.key.name === targetIdentifier &&
@@ -127,7 +137,7 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
              path.parentPath.node.value.name === targetIdentifier) {
            return;
          }
-         // If visiting the key 'user' in { user: ... }, it's just a property name, not usage.
+         // If visiting the key 'user' in { user: ... }, it's just a property name
          if (path.key === 'key') return;
       }
       
@@ -136,8 +146,7 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
 
       // --- INCLUSIONS (Meaningful Interactions) ---
 
-      // A: JSX Rendering / Usage: <div>{user}</div> OR <Child data={user} />
-      // Note: <Child user={user} /> was caught by Exclusion B above.
+      // A: JSX Rendering / Usage: <div>{user}</div>
       if (path.parentPath.isJSXExpressionContainer()) {
         interactionCount++;
         reasons.push('JSX Rendering');
@@ -164,11 +173,10 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
         return;
       }
 
-      // D: Hook Dependencies
+      // D: Hook Dependencies (useEffect(..., [user]))
       if (path.parentPath.isArrayExpression()) {
         const callExpr = path.parentPath.parentPath;
         if (callExpr?.isCallExpression() && callExpr.node.callee.type === 'Identifier') {
-           // Heuristic: hooks start with 'use'
            if (callExpr.node.callee.name.startsWith('use')) {
              interactionCount++;
              reasons.push('Hook Dependency');
@@ -177,10 +185,25 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
         }
       }
       
-      // E: Function Calls: doSomething(user)
+      // E: Function Calls
+      // As argument: doSomething(user)
       if (path.parentPath.isCallExpression() && path.listKey === 'arguments') {
         interactionCount++;
         reasons.push('Function Argument');
+        return;
+      }
+      
+      // As callee: user() or user.method()
+      if (path.parentPath.isCallExpression() && path.key === 'callee') {
+        interactionCount++;
+        reasons.push('Function Execution');
+        return;
+      }
+      
+      // As new instance: new User()
+      if (path.parentPath.isNewExpression() && path.key === 'callee') {
+        interactionCount++;
+        reasons.push('Class Instantiation');
         return;
       }
     }

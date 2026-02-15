@@ -1,16 +1,16 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
- * @stamp {"ts":"2026-02-15T16:10:00Z"}
+ * @stamp {"ts":"2026-02-15T18:30:00Z"}
  * @architectural-role Business Logic
  * @description
  * A pure service that calculates the final set of file paths for a context pack.
  * Encapsulates the logic for seed collection, dual-resolution graph traversal, 
- * and resolution reconciliation. It detects and warns about conflicting 
- * instructions (e.g., a file targeted as both Full and Summary).
+ * and resolution reconciliation. It enforces a "Highest Resolution Wins" policy 
+ * for output generation while detecting and warning about internal conflicts.
  *
  * @core-principles
  * 1. IS a framework-agnostic logic engine for file discovery.
- * 2. MUST identify and warn about conflicting resolution instructions for the same path.
+ * 2. MUST reconcile conflicting resolution instructions (Full > Summary).
  * 3. OWNS the coordination of tracing modes and exclusion rules.
  *
  * @api-declaration
@@ -39,7 +39,8 @@ import type { QueryPanelState } from './types';
  * @id packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts#discoverContextPaths
  * @description
  * Executes the full discovery pipeline: Seed Collection -> Dual-Resolution Trace -> 
- * Reconciliation & Sieve. Identifies resolution conflicts between seeds and traces.
+ * Reconciliation & Sieve. Identifies resolution conflicts between seeds and traces, 
+ * and collapses them into the highest priority instruction.
  */
 export async function discoverContextPaths(
   fileIndex: Map<string, FileEntry>,
@@ -50,35 +51,29 @@ export async function discoverContextPaths(
   let traceWarning = '';
 
   /**
-   * instructionMap: Handles silent de-duplication of exact instruction strings.
-   * Key: "path" or "path:summary"
-   * Value: ResolutionLevel
-   */
-  const instructionMap = new Map<string, ResolutionLevel>();
-
-  /**
-   * identityMap: Tracks all requested resolutions for a physical path to detect conflicts.
-   * Key: "path"
-   * Value: Set of ResolutionLevels
+   * identityMap: Tracks all requested resolutions for a physical path.
+   * Key: "src/file.ts" (Raw Physical Path)
+   * Value: Set of requested resolutions {'full', 'summary'}
    */
   const identityMap = new Map<string, Set<ResolutionLevel>>();
 
-  const addInstruction = (path: string, resolution: ResolutionLevel) => {
-    const rawPath = path.split(':')[0]; // Sanity check for incoming strings
-    const instruction = resolution === 'summary' ? `${rawPath}:summary` : rawPath;
-
-    // Silent de-duplication of the instruction string
-    instructionMap.set(instruction, resolution);
-
-    // Track resolutions per physical identity
+  const addRequest = (path: string, resolution: ResolutionLevel) => {
+    const rawPath = path.split(':')[0]; // Ensure we work with physical identity
     const resolutionSet = identityMap.get(rawPath) ?? new Set<ResolutionLevel>();
     resolutionSet.add(resolution);
     identityMap.set(rawPath, resolutionSet);
   };
 
+  // We explicitly track "Seeds" separately. 
+  // Only Seeds trigger a trace. Discovered dependencies do NOT trigger sub-traces.
+  const seedPaths = new Set<string>();
+
   // 1. Gather Seeds: Docs Folders (Defaults to Full Extraction)
   const docFiles = getFilesForCheckedFolders(fileIndex, state.checkedDocsFolders);
-  docFiles.forEach(path => addInstruction(path, 'full'));
+  docFiles.forEach(path => {
+    addRequest(path, 'full');
+    seedPaths.add(path);
+  });
 
   // 2. Gather Seeds: Wildcards (Defaults to Full Extraction)
   if (state.wildcardQuery.trim()) {
@@ -86,26 +81,31 @@ export async function discoverContextPaths(
     for (const pattern of patterns) {
       const regex = wildcardToRegExp(pattern);
       const matches = allFilePaths.filter(p => regex.test(p));
-      matches.forEach(m => addInstruction(m, 'full'));
+      matches.forEach(m => {
+        addRequest(m, 'full');
+        seedPaths.add(m);
+      });
     }
   }
 
   // 3. Gather Seeds: Trace Start
   if (state.traceQuery) {
     const startPath = state.traceQuery.split('#')[0];
-    addInstruction(startPath, 'full');
+    addRequest(startPath, 'full');
+    seedPaths.add(startPath);
   }
 
   // 4. Perform Dependency Trace
+  // We trace ONLY from the seeds. 
   const totalHops = Math.max(state.traceDepth, state.summaryTraceDepth);
-  if (totalHops > 0 && (state.traceQuery || docFiles.length > 0 || state.wildcardQuery.trim())) {
+  
+  if (totalHops > 0 && seedPaths.size > 0) {
     if (symbolGraph) {
       if (state.traceMode === 'logical') {
         const graphFiles = Array.from(symbolGraph.values()).map(n => n.filePath);
         const astCache = await buildTemporaryAstCache(fileIndex, graphFiles);
 
-        // We trace from every unique physical path currently in our identity map
-        for (const startPath of identityMap.keys()) {
+        for (const startPath of seedPaths) {
           const tracedNodes = traceLogicalPath(symbolGraph, astCache, startPath, {
             mode: 'logical',
             direction: state.traceDirection,
@@ -114,14 +114,15 @@ export async function discoverContextPaths(
           });
 
           tracedNodes.forEach(node => {
-            addInstruction(node.path, node.resolution);
+            // Important: We add requests for discovered nodes, but we do NOT add them to seedPaths.
+            addRequest(node.path, node.resolution);
           });
         }
       } else {
         // Physical tracing fallback
-        for (const startPath of identityMap.keys()) {
+        for (const startPath of seedPaths) {
           const tracedPaths = traceSymbolGraph(symbolGraph, startPath, state.traceDirection, state.traceDepth);
-          tracedPaths.forEach(p => addInstruction(p, 'full'));
+          tracedPaths.forEach(p => addRequest(p, 'full'));
         }
       }
     } else {
@@ -129,32 +130,41 @@ export async function discoverContextPaths(
     }
   }
 
-  // 5. Generate Resolution Warnings (Conflict Detection)
+  // 5. Reconciliation & Warning Generation
   const resolutionWarnings: string[] = [];
-  identityMap.forEach((resolutions, path) => {
+  const finalInstructions: string[] = [];
+
+  identityMap.forEach((resolutions, rawPath) => {
+    // A. Detect Conflicts
     if (resolutions.size > 1) {
       resolutionWarnings.push(
-        `Conflict: '${path}' is targeted as both Full and Summary. Both will be processed.`
+        `Conflict: '${rawPath}' targeted as both Full and Summary. Defaulting to Full.`
       );
+    }
+
+    // B. Generate Output (Highest Resolution Wins)
+    if (resolutions.has('full')) {
+      finalInstructions.push(rawPath);
+    } else {
+      finalInstructions.push(`${rawPath}:summary`);
     }
   });
 
-  let finalInstructions = Array.from(instructionMap.keys());
-
   // 6. Apply Exclusions (Sieve)
   // Exclusions match against the physical path part of the instruction
+  let filteredInstructions = finalInstructions;
   if (state.exclusionWildcardQuery.trim()) {
     const exclusionPatterns = state.exclusionWildcardQuery.split(',').map(p => p.trim()).filter(Boolean);
     const exclusionRegexes = exclusionPatterns.map(wildcardToRegExp);
     
-    finalInstructions = finalInstructions.filter(instruction => {
+    filteredInstructions = finalInstructions.filter(instruction => {
       const rawPath = instruction.split(':')[0];
       return !exclusionRegexes.some(regex => regex.test(rawPath));
     });
   }
 
   return {
-    paths: finalInstructions,
+    paths: filteredInstructions,
     traceWarning,
     resolutionWarnings
   };
