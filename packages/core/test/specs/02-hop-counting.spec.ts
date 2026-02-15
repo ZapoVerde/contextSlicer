@@ -1,12 +1,17 @@
 /**
  * @file packages/core/test/specs/02-hop-counting.spec.ts
- * @stamp {"ts":"2026-02-15T21:15:00Z"}
+ * @stamp {"ts":"2026-02-15T23:45:00Z"}
  * @architectural-role Test Suite
+ * @test-target packages/core/src/logic/symbolGraph/augmentedTracer.ts
+ *
  * @description
  * Validates the distance calculation heuristics of the Augmented Tracer.
  * Compares Physical vs. Logical hop counts to verify that the Two-Part Pipe 
  * Rule correctly reduces noise by bypassing structural passthroughs.
  * 
+ * @criticality 2. Core Business Logic Orchestration.
+ * @testing-layer Integration
+ *
  * @contract
  *   assertions:
  *     purity: pure
@@ -33,17 +38,17 @@ describe('Logical vs Physical Hop Counting', () => {
 
     // 1. Physical Trace (Traditional BFS)
     // App -> ComplexBarrel -> components/index -> buttons/index -> core/index -> Button.tsx
-    // (Note: tracer.ts counts every file junction as a hop)
+    // The traditional tracer counts every file junction as a hop.
     const physicalResults = traceSymbolGraph(graph, seed, 'dependencies', 5);
     expect(physicalResults).toContain(target);
 
     // 2. Logical Trace (Smart Trace)
-    // The chain contains 4 consecutive Pipes (ComplexBarrel, components/index, buttons/index, core/index)
+    // The chain contains multiple Pipes (ComplexBarrel, components/index, etc.)
     // These cost 0. Only Button.tsx is Logic, costing 1.
     const logicalResults = traceLogicalPath(graph, astCache, seed, {
       mode: 'logical',
       direction: 'dependencies',
-      maxHops: 1, // We only allow ONE logical junction
+      maxHops: 1, 
       summaryHops: 1
     });
 
@@ -83,7 +88,10 @@ describe('Logical vs Physical Hop Counting', () => {
     const seed = 'packages/web/App.tsx';
     const target = 'packages/ui-kit/index.ts';
 
-    // App -> ComplexBarrel (Pipe, 0) -> ui-kit/index.ts (Logic/Side-effect, 1)
+    // TRACE PATH:
+    // App -> ComplexBarrel (re-exports ThemeProvider from index.ts)
+    // ComplexBarrel = Pipe (Cost 0)
+    // ui-kit/index.ts = Logic (Cost 1 - contains side effect console.log)
     const results = traceLogicalPath(graph, astCache, seed, {
       mode: 'logical',
       direction: 'dependencies',
@@ -95,7 +103,7 @@ describe('Logical vs Physical Hop Counting', () => {
     
     expect(uiKitIndex).toBeDefined();
     expect(uiKitIndex?.depth).toBe(1); 
-    expect(uiKitIndex?.status).toBe('meaningful'); // It has a side effect (console.log)
+    expect(uiKitIndex?.status).toBe('meaningful');
   });
 
   it('should exclude distant logic files that exceed the logical hop budget', () => {

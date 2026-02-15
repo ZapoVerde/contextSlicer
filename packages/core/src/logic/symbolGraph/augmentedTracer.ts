@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/symbolGraph/augmentedTracer.ts
- * @stamp {"ts":"2026-02-15T21:55:00Z"}
+ * @stamp {"ts":"2026-02-15T23:40:00Z"}
  * @architectural-role Business Logic
  * @description
  * The core logical tracing engine. Performs a BFS traversal of the symbol graph
@@ -16,7 +16,7 @@
  * @api-declaration
  *   export function traceLogicalPath(
  *     graph: SymbolGraph, 
- *     astCache: Map<string, any>,
+ *     astCache: Map<string, Node>,
  *     startId: string, 
  *     options: TraceOptions
  *   ): TracedNode[];
@@ -27,6 +27,7 @@
  *     external_io: none
  */
 
+import type { Node } from '@babel/types';
 import type { SymbolGraph, TraceOptions, TracedNode, SymbolNode, ResolutionLevel } from './types';
 import { hasReexports } from './analyzers/barrelDetector';
 import { hasLogicActivity } from './analyzers/flowAnalyzer';
@@ -46,7 +47,7 @@ interface QueueItem {
  */
 export function traceLogicalPath(
   graph: SymbolGraph,
-  astCache: Map<string, any>,
+  astCache: Map<string, Node>,
   startId: string,
   options: TraceOptions
 ): TracedNode[] {
@@ -59,10 +60,14 @@ export function traceLogicalPath(
   // 1. Resolve starting points (Seed)
   if (startId.includes('#')) {
     const node = graph.get(startId);
-    if (node) startNodes.add(node);
+    if (node) {
+      startNodes.add(node);
+    }
   } else {
     graph.forEach(node => {
-      if (node.filePath === startId) startNodes.add(node);
+      if (node.filePath === startId) {
+        startNodes.add(node);
+      }
     });
   }
 
@@ -114,14 +119,15 @@ export function traceLogicalPath(
 
     for (const neighborId of neighbors) {
       const neighborNode = graph.get(neighborId);
-      if (!neighborNode) continue;
+      if (!neighborNode) {
+        continue;
+      }
 
       const neighborPath = neighborNode.filePath;
       const ast = astCache.get(neighborPath);
 
       // 3. Apply the Two-Part Pipe Detection Rule
       // A file is a Pipe ONLY if it (Has Re-exports) AND (Has NO Logic Activity)
-      // If AST is missing, we treat as Logic (Cost 1) to avoid silent wormholes.
       const reexports = ast ? hasReexports(ast) : false;
       const activity = ast ? hasLogicActivity(ast) : true; 
       
@@ -134,7 +140,9 @@ export function traceLogicalPath(
       const nextLogicalHops = logicalHops + cost;
 
       // 4. Boundary Enforcement
-      if (nextLogicalHops > totalMaxHops) continue;
+      if (nextLogicalHops > totalMaxHops) {
+        continue;
+      }
 
       // 5. Resolution Assignment (Distance-First Gradient)
       // Passive pipes are ALWAYS summarized unless they were seed files.
@@ -146,13 +154,13 @@ export function traceLogicalPath(
 
       // 6. Cheap-Path BFS Update
       const prevMin = minLogicalHops.get(neighborId);
-      
-      // We update if we found a shorter logical path OR if we found a way to upgrade resolution 
-      // (though BFS usually finds the best resolution first in this specific cost model).
       const existing = results.get(neighborPath);
-      const isResolutionUpgrade = existing?.resolution === 'summary' && resolution === 'full';
+      
+      const isNewNode = prevMin === undefined;
+      const isShorterPath = !isNewNode && nextLogicalHops < prevMin;
+      const isResolutionUpgrade = !isNewNode && !isShorterPath && existing?.resolution === 'summary' && resolution === 'full';
 
-      if (prevMin === undefined || nextLogicalHops < prevMin || isResolutionUpgrade) {
+      if (isNewNode || isShorterPath || isResolutionUpgrade) {
         minLogicalHops.set(neighborId, nextLogicalHops);
         
         results.set(neighborPath, {

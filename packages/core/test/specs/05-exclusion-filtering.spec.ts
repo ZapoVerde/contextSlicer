@@ -1,12 +1,17 @@
 /**
  * @file packages/core/test/specs/05-exclusion-filtering.spec.ts
- * @stamp {"ts":"2026-02-15T22:45:00Z"}
+ * @stamp {"ts":"2026-02-15T23:10:00Z"}
  * @architectural-role Test Suite
+ * @test-target packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
+ *
  * @description
  * Validates the exclusion filtering engine (The Sieve). Verifies that wildcard 
  * patterns correctly prune the discovery list and that the tracer maintains 
  * connectivity through excluded nodes (Trace-Through).
  * 
+ * @criticality 2. Core Business Logic Orchestration.
+ * @testing-layer Integration
+ *
  * @contract
  *   assertions:
  *     purity: pure
@@ -45,27 +50,30 @@ describe('Exclusion Filtering & Pattern Matching', () => {
     ...overrides
   });
 
-  it('should exclude test files while maintaining "Trace-Through" connectivity', async () => {
+  it('should exclude intermediate nodes while maintaining "Trace-Through" connectivity', async () => {
     const fileIndex = harness.getFileIndex();
     const graph = harness.getSymbolGraph();
 
-    // SCENARIO: 
-    // App.tsx -> userService.ts -> userService.spec.ts -> validator.ts
-    // We want to exclude the .spec.ts file but still find validator.ts via the trace.
+    // SCENARIO: Trace-Through
+    // Chain: ScentChainA -> ScentChainB -> ScentChainC
+    // We want to exclude the middle node (ScentChainB) but still find the leaf (ScentChainC).
+    // This proves the graph was traversed BEFORE the exclusion filter was applied.
     const state = createBaseState({
-      traceQuery: 'packages/web/App.tsx',
+      traceQuery: 'packages/web/ScentChainA.ts',
       traceDepth: 5,
-      exclusionWildcardQuery: '**/*.spec.ts, **/*.test.tsx'
+      exclusionWildcardQuery: '**/ScentChainB.ts'
     });
 
     const { paths } = await discoverContextPaths(fileIndex, graph, state);
 
-    // 1. validator.ts should be included (discovered through the spec file)
-    expect(paths.some(p => p.includes('packages/web/validator.ts'))).toBe(true);
+    // 1. ScentChainC MUST be included (it was reached via ScentChainB during graph traversal)
+    expect(paths.some(p => p.includes('packages/web/ScentChainC.ts'))).toBe(true);
 
-    // 2. The spec/test files must be strictly absent
-    expect(paths.some(p => p.includes('userService.spec.ts'))).toBe(false);
-    expect(paths.some(p => p.includes('validator.test.tsx'))).toBe(false);
+    // 2. ScentChainA MUST be included (it is the seed)
+    expect(paths.some(p => p.includes('packages/web/ScentChainA.ts'))).toBe(true);
+
+    // 3. ScentChainB MUST be absent (it was caught in the exclusion sieve)
+    expect(paths.some(p => p.includes('packages/web/ScentChainB.ts'))).toBe(false);
   });
 
   it('should exclude entire directories via recursive wildcards (legacy/**)', async () => {
@@ -119,9 +127,12 @@ describe('Exclusion Filtering & Pattern Matching', () => {
 
     const { paths } = await discoverContextPaths(fileIndex, graph, state);
 
+    // Verify multiple exclusions are respected
     expect(paths.some(p => p.includes('TODO.ts'))).toBe(false);
     expect(paths.some(p => p.includes('data.json'))).toBe(false);
     expect(paths.some(p => p.includes('config.yaml'))).toBe(false);
+    
+    // Verify valid files remain
     expect(paths.some(p => p.includes('App.tsx'))).toBe(true);
   });
 });

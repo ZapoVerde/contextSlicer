@@ -1,6 +1,6 @@
 /**
  * @file packages/core/test/harness/network-harness.ts
- * @stamp {"ts":"2026-02-15T20:20:00Z"}
+ * @stamp {"ts":"2026-02-15T23:15:00Z"}
  * @architectural-role Utility
  * @description
  * The authoritative test harness for the Hardened Prism Network v2.1.
@@ -58,6 +58,9 @@ export class NetworkHarness {
     return harness;
   }
 
+  /**
+   * Recursively scans the testnetwork directory to populate the in-memory FileIndex.
+   */
   private async initializeFileIndex(): Promise<void> {
     const walk = (dir: string) => {
       const files = fs.readdirSync(dir);
@@ -86,7 +89,7 @@ export class NetworkHarness {
               });
               this.astCache.set(relPath, ast);
             } catch (e) {
-              // Silent skip for intentionally malformed tests if added later
+              // Intentionally malformed files or Babel-incompatible syntax
             }
           }
         }
@@ -100,10 +103,12 @@ export class NetworkHarness {
     walk(this.networkPath);
   }
 
+  /**
+   * Orchestrates the build of the Symbol Graph using the provided FileIndex.
+   * Injects monorepo aliases to ensure cross-package resolution works correctly.
+   */
   private async buildGraph(): Promise<void> {
     const errors: string[] = [];
-    // We assume an empty alias map for now, as PathResolver handles relative resolution 
-    // for standard structures, but we could pass the tsconfig mapping here if needed.
     const aliasMap = {
       '@prism/shared-types': 'packages/shared-types',
       '@prism/ui-kit': 'packages/ui-kit',
@@ -112,8 +117,14 @@ export class NetworkHarness {
 
     this.symbolGraph = await buildSymbolGraph(this.fileIndex, aliasMap, errors);
 
+    // CRITICAL DIAGNOSTIC: 
+    // If the graph contains resolution errors (like unresolvable relative imports),
+    // we must report them loudly to the test runner to prevent "Ghost Dependencies."
     if (errors.length > 0) {
-      console.warn('[Harness] Graph build completed with resolution warnings:', errors);
+      console.error('\n' + '='.repeat(60));
+      console.error('[Harness] Graph build completed with resolution errors:');
+      errors.forEach(e => console.error(`  - ${e}`));
+      console.error('='.repeat(60) + '\n');
     }
   }
 
