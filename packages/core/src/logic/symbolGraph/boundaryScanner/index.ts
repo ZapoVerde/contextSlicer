@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/symbolGraph/boundaryScanner/index.ts
- * @stamp {"ts":"2026-02-15T12:10:00Z"}
+ * @stamp {"ts":"2026-02-15T21:40:00Z"}
  * @architectural-role Business Logic / Discovery Engine
  * @description
  * Orchestrates the discovery of "Boundary Crossings." It identifies symbols 
@@ -17,7 +17,8 @@
  * @api-declaration
  *   export function scanBoundaries(
  *     fileIndex: Map<string, FileEntry>,
- *     selectedFiles: SelectedFileMap
+ *     selectedFiles: SelectedFileMap,
+ *     aliasMap?: Record<string, string>
  *   ): BoundarySymbol[];
  * 
  * @contract
@@ -40,10 +41,12 @@ import type { BoundarySymbol, SelectedFileMap } from './types';
  * 
  * @param fileIndex - The global project file registry.
  * @param selectedFiles - Map of file paths to their pre-parsed Babel ASTs.
+ * @param aliasMap - Optional mapping for path aliases (e.g. tsconfig paths).
  */
 export function scanBoundaries(
   fileIndex: Map<string, FileEntry>,
-  selectedFiles: SelectedFileMap
+  selectedFiles: SelectedFileMap,
+  aliasMap: Record<string, string> = {}
 ): BoundarySymbol[] {
   const boundarySymbols = new Map<string, BoundarySymbol>();
   
@@ -59,14 +62,10 @@ export function scanBoundaries(
         ImportDeclaration(path) {
           const importSource = path.node.source.value;
           
-          // Only process relative imports.
+          // Resolve path using potential aliases or relative navigation.
           // Third-party modules (node_modules) are handled by Layer 2 
           // only if specifically configured (currently out of scope).
-          if (!importSource.startsWith('.')) {
-            return;
-          }
-
-          const resolvedPath = resolveImportPath(filePath, importSource, fileIndex);
+          const resolvedPath = resolveImportPath(filePath, importSource, fileIndex, aliasMap);
           
           // BOUNDARY CONDITION:
           // 1. The file exists in the project (is not a broken link).

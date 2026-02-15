@@ -16,10 +16,6 @@
  *     characters in the input string to ensure they are treated as literal characters.
  * 4.  **RegExp Object Creation:** It returns a final, compiled `RegExp` object, ready
  *     to be used for matching against file paths.
- *
- * @purpose This utility is the engine behind the "Wildcard Search" in the
- * `ContextQueryPanel`, allowing users to make powerful, broad selections of files
- * without needing to write complex regular expressions themselves.
  */
 
 /**
@@ -31,23 +27,25 @@
  * @returns A RegExp object.
  */
 export function wildcardToRegExp(pattern: string): RegExp {
-  // Use unique placeholders to avoid conflicts with file names.
-  const placeholderDoubleStar = `__DOUBLE_STAR_PLACEHOLDER_${Date.now()}__`;
-  const placeholderSingleStar = `__SINGLE_STAR_PLACEHOLDER_${Date.now()}__`;
+  // 1. Placeholder strategy to protect wildcards during escaping
+  const DOUBLE_STAR = '%%DOUBLE_STAR%%';
+  const SINGLE_STAR = '%%SINGLE_STAR%%';
 
-  // 1. Replace our special wildcards with safe placeholders first.
-  const tempPattern = pattern
-    .replace(/\*\*/g, placeholderDoubleStar)
-    .replace(/\*/g, placeholderSingleStar);
+  // 2. Swap wildcards for safe placeholders
+  let temp = pattern
+    .replace(/\*\*/g, DOUBLE_STAR)
+    .replace(/\*/g, SINGLE_STAR);
 
-  // 2. Now, escape all special RegExp characters in the rest of the string.
-  const escapedPattern = tempPattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  // 3. Escape all special regex characters.
+  // We use \\\\$& to ensure the final string passed to new RegExp has double backslashes.
+  // e.g. '.' -> '\\.' -> new RegExp('\\.') -> matches literal dot.
+  temp = temp.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
 
-  // 3. Finally, replace the placeholders with their actual RegExp equivalents.
-  const finalPattern = escapedPattern
-    .replace(new RegExp(placeholderDoubleStar, 'g'), '.*')
-    .replace(new RegExp(placeholderSingleStar, 'g'), '[^/]*');
+  // 4. Swap placeholders back to Regex equivalents
+  temp = temp
+    .replace(new RegExp(DOUBLE_STAR, 'g'), '.*')
+    .replace(new RegExp(SINGLE_STAR, 'g'), '[^/]*');
 
-  // 4. Create the final RegExp, anchored to the start and end of the string.
-  return new RegExp(`^${finalPattern}$`,'i');
+  // 5. Anchor the regex to match the full path
+  return new RegExp(`^${temp}$`, 'i');
 }

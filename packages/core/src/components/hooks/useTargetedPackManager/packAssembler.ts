@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/packAssembler.ts
- * @stamp {"ts":"2026-02-15T10:30:00Z"}
+ * @stamp {"ts":"2026-02-15T22:20:00Z"}
  * @architectural-role Business Logic / Orchestrator
  * @description
  * Orchestrates the construction of the multi-layered context pack. It applies a 
@@ -62,19 +62,17 @@ export async function assembleContextPack(
   const pack: string[] = [];
   const selectedFilesForBoundaryScan: Map<string, File> = new Map();
 
-  // 1. Layer 1: Spatial Map
+  // --- LAYER 1: SPATIAL MAP ---
   const tree = generateFileTree(targets.map(t => t.path));
   pack.push('--- START OF CONTEXT PACK ---');
   pack.push('\n--- LAYER 1: SPATIAL MAP ---\n');
-  pack.push('```text');
   pack.push(tree);
-  pack.push('```');
 
-  // Layer 2 Marker (Reference for splice insertion)
+  // Marker for Layer 2 insertion point (used for Layer 1.5 injection)
   const sourceLogicMarker = '\n--- LAYER 2: SOURCE LOGIC ---\n';
   pack.push(sourceLogicMarker);
 
-  // 2. Process Files
+  // --- LAYER 2: SOURCE LOGIC ---
   for (const target of targets) {
     const fileEntry = fileIndex.get(target.path);
     const preFlight = preFlightResults.get(target.path);
@@ -90,6 +88,8 @@ export async function assembleContextPack(
       pack.push(`\n--- END OF FILE ---\n`);
       
       // Collect AST for Layer 1.5 Boundary Discovery
+      // We only scan boundaries for FULL implementation files to keep the 
+      // boundary library focused on the primary context.
       if (preFlight.ast) {
         selectedFilesForBoundaryScan.set(target.path, preFlight.ast);
       }
@@ -103,6 +103,7 @@ export async function assembleContextPack(
           ast = parser.parse(preFlight.content, {
             sourceType: 'module',
             plugins: ['typescript', 'jsx'],
+            errorRecovery: true
           });
         } catch {
           ast = null;
@@ -122,12 +123,18 @@ export async function assembleContextPack(
     }
   }
 
-  // 3. Layer 1.5: Project Boundary Library
+  // --- LAYER 1.5: BOUNDARY LIBRARY ---
   // We scan the symbols imported by our Seeds that are NOT in the selection.
   if (options.includeBoundaryLibrary && selectedFilesForBoundaryScan.size > 0) {
+    // Note: scanBoundaries will use the aliasMap if we pass it, but here we relies on
+    // the simpler version or update the signature if needed. 
+    // The previous Turn 3 update to scanBoundaries allows an optional aliasMap.
+    // For now, we use defaults as the aliasMap isn't passed into assembleContextPack.
+    // (In a full app, this comes from config, but for now defaults are safe).
     const boundarySymbols = scanBoundaries(
       fileIndex,
-      selectedFilesForBoundaryScan
+      selectedFilesForBoundaryScan,
+      {} // Todo: Inject aliasMap from store/config if available
     );
 
     if (boundarySymbols.length > 0) {
@@ -137,12 +144,15 @@ export async function assembleContextPack(
       );
       
       if (boundaryLibrary) {
+        // Inject Layer 1.5 BEFORE Layer 2
         const markerIndex = pack.indexOf(sourceLogicMarker);
-        pack.splice(markerIndex, 0, 
-          '\n--- LAYER 1.5: BOUNDARY LIBRARY ---\n',
-          boundaryLibrary,
-          '\n'
-        );
+        if (markerIndex !== -1) {
+          pack.splice(markerIndex, 0, 
+            '\n--- LAYER 1.5: BOUNDARY LIBRARY ---\n',
+            boundaryLibrary,
+            '\n'
+          );
+        }
       }
     }
   }

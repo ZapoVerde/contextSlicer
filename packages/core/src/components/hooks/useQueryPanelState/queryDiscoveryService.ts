@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
- * @stamp {"ts":"2026-02-15T18:30:00Z"}
+ * @stamp {"ts":"2026-02-15T22:05:00Z"}
  * @architectural-role Business Logic
  * @description
  * A pure service that calculates the final set of file paths for a context pack.
@@ -58,14 +58,15 @@ export async function discoverContextPaths(
   const identityMap = new Map<string, Set<ResolutionLevel>>();
 
   const addRequest = (path: string, resolution: ResolutionLevel) => {
-    const rawPath = path.split(':')[0]; // Ensure we work with physical identity
+    // Ensure we are working with the clean physical path
+    const rawPath = path.split(':')[0]; 
     const resolutionSet = identityMap.get(rawPath) ?? new Set<ResolutionLevel>();
     resolutionSet.add(resolution);
     identityMap.set(rawPath, resolutionSet);
   };
 
   // We explicitly track "Seeds" separately. 
-  // Only Seeds trigger a trace. Discovered dependencies do NOT trigger sub-traces.
+  // Seeds are the entry points for the trace.
   const seedPaths = new Set<string>();
 
   // 1. Gather Seeds: Docs Folders (Defaults to Full Extraction)
@@ -96,7 +97,6 @@ export async function discoverContextPaths(
   }
 
   // 4. Perform Dependency Trace
-  // We trace ONLY from the seeds. 
   const totalHops = Math.max(state.traceDepth, state.summaryTraceDepth);
   
   if (totalHops > 0 && seedPaths.size > 0) {
@@ -105,7 +105,7 @@ export async function discoverContextPaths(
         const graphFiles = Array.from(symbolGraph.values()).map(n => n.filePath);
         const astCache = await buildTemporaryAstCache(fileIndex, graphFiles);
 
-        for (const startPath of seedPaths) {
+        for (const startPath of Array.from(seedPaths)) {
           const tracedNodes = traceLogicalPath(symbolGraph, astCache, startPath, {
             mode: 'logical',
             direction: state.traceDirection,
@@ -114,13 +114,13 @@ export async function discoverContextPaths(
           });
 
           tracedNodes.forEach(node => {
-            // Important: We add requests for discovered nodes, but we do NOT add them to seedPaths.
+            // Add discovered node resolution to the map
             addRequest(node.path, node.resolution);
           });
         }
       } else {
-        // Physical tracing fallback
-        for (const startPath of seedPaths) {
+        // Physical tracing fallback (Legacy support)
+        for (const startPath of Array.from(seedPaths)) {
           const tracedPaths = traceSymbolGraph(symbolGraph, startPath, state.traceDirection, state.traceDepth);
           tracedPaths.forEach(p => addRequest(p, 'full'));
         }
@@ -135,23 +135,22 @@ export async function discoverContextPaths(
   const finalInstructions: string[] = [];
 
   identityMap.forEach((resolutions, rawPath) => {
-    // A. Detect Conflicts
-    if (resolutions.size > 1) {
+    // A. Detect Conflicts (Seed vs Trace or Depth Overlap)
+    if (resolutions.has('full') && resolutions.has('summary')) {
       resolutionWarnings.push(
         `Conflict: '${rawPath}' targeted as both Full and Summary. Defaulting to Full.`
       );
     }
 
-    // B. Generate Output (Highest Resolution Wins)
+    // B. Generate Output (Highest Resolution Wins: Full > Summary)
     if (resolutions.has('full')) {
       finalInstructions.push(rawPath);
-    } else {
+    } else if (resolutions.has('summary')) {
       finalInstructions.push(`${rawPath}:summary`);
     }
   });
 
   // 6. Apply Exclusions (Sieve)
-  // Exclusions match against the physical path part of the instruction
   let filteredInstructions = finalInstructions;
   if (state.exclusionWildcardQuery.trim()) {
     const exclusionPatterns = state.exclusionWildcardQuery.split(',').map(p => p.trim()).filter(Boolean);

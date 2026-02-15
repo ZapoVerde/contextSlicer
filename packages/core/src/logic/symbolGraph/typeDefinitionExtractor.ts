@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/symbolGraph/typeDefinitionExtractor.ts
- * @stamp {"ts":"2026-02-15T09:45:00Z"}
+ * @stamp {"ts":"2026-02-15T21:45:00Z"}
  * @architectural-role Business Logic / Extraction Engine
  * @description
  * Extracts raw source code for specific type definitions from files outside the 
@@ -85,7 +85,7 @@ export async function generateBoundaryLibrary(
 
 /**
  * Parses source code and extracts the AST nodes for specific named exports.
- * Handles Interfaces, TypeAliases, Classes, Enums, and Functions.
+ * Handles Interfaces, TypeAliases, Classes, Enums, Namespaces, and Functions.
  */
 function extractDefinitions(source: string, identifiers: Set<string>): string[] {
   const definitions: string[] = [];
@@ -102,6 +102,7 @@ function extractDefinitions(source: string, identifiers: Set<string>): string[] 
     // Handle: export type User = { ... }
     // Handle: export class User { ... }
     // Handle: export enum User { ... }
+    // Handle: export namespace API { ... }
     ExportNamedDeclaration(path) {
       const decl = path.node.declaration;
       
@@ -115,7 +116,8 @@ function extractDefinitions(source: string, identifiers: Set<string>): string[] 
         decl.type === 'TSTypeAliasDeclaration' ||
         decl.type === 'ClassDeclaration' ||
         decl.type === 'TSEnumDeclaration' || 
-        decl.type === 'FunctionDeclaration'
+        decl.type === 'FunctionDeclaration' ||
+        decl.type === 'TSModuleDeclaration' // Covers TypeScript Namespaces
       ) {
         if (decl.id?.type === 'Identifier') {
           name = decl.id.name;
@@ -131,14 +133,9 @@ function extractDefinitions(source: string, identifiers: Set<string>): string[] 
 
       // 3. Extract if matches requested symbol
       if (name && identifiers.has(name) && !found.has(name)) {
-        if (decl.start !== null && decl.end !== null) {
-          // We extract the whole ExportNamedDeclaration to keep the 'export' keyword
-          // or just the declaration? The prompt example showed 'export interface...', 
-          // so using path.node (the export wrapper) is safer for context.
-          if (path.node.start !== null && path.node.end !== null) {
-            definitions.push(source.slice(path.node.start, path.node.end));
-            found.add(name);
-          }
+        if (path.node.start !== null && path.node.end !== null) {
+          definitions.push(source.slice(path.node.start, path.node.end));
+          found.add(name);
         }
       }
     },

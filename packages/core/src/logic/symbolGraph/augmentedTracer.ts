@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/symbolGraph/augmentedTracer.ts
- * @stamp {"ts":"2026-02-15T20:10:00Z"}
+ * @stamp {"ts":"2026-02-15T21:55:00Z"}
  * @architectural-role Business Logic
  * @description
  * The core logical tracing engine. Performs a BFS traversal of the symbol graph
@@ -99,7 +99,7 @@ export function traceLogicalPath(
   while (head < queue.length) {
     const { node, logicalHops, physicalDepth } = queue[head++];
 
-    if (logicalHops >= totalMaxHops || physicalDepth >= PHYSICAL_LIMIT) {
+    if (logicalHops > totalMaxHops || physicalDepth >= PHYSICAL_LIMIT) {
       continue;
     }
 
@@ -121,6 +121,7 @@ export function traceLogicalPath(
 
       // 3. Apply the Two-Part Pipe Detection Rule
       // A file is a Pipe ONLY if it (Has Re-exports) AND (Has NO Logic Activity)
+      // If AST is missing, we treat as Logic (Cost 1) to avoid silent wormholes.
       const reexports = ast ? hasReexports(ast) : false;
       const activity = ast ? hasLogicActivity(ast) : true; 
       
@@ -132,20 +133,24 @@ export function traceLogicalPath(
       const cost = isPipe ? 0 : 1;
       const nextLogicalHops = logicalHops + cost;
 
-      // 4. Resolution Assignment (Distance-First Gradient)
+      // 4. Boundary Enforcement
+      if (nextLogicalHops > totalMaxHops) continue;
+
+      // 5. Resolution Assignment (Distance-First Gradient)
+      // Passive pipes are ALWAYS summarized unless they were seed files.
       let resolution: ResolutionLevel = 'summary';
 
-      if (nextLogicalHops <= options.maxHops) {
-        resolution = isPipe ? 'summary' : 'full';
-      } else if (nextLogicalHops <= options.summaryHops) {
-        resolution = 'summary';
-      } else {
-        continue; // Outside logical hop budget
+      if (isLogic && nextLogicalHops <= options.maxHops) {
+        resolution = 'full';
       }
 
-      // 5. Cheap-Path BFS Update
+      // 6. Cheap-Path BFS Update
       const prevMin = minLogicalHops.get(neighborId);
-      const isResolutionUpgrade = results.get(neighborPath)?.resolution === 'summary' && resolution === 'full';
+      
+      // We update if we found a shorter logical path OR if we found a way to upgrade resolution 
+      // (though BFS usually finds the best resolution first in this specific cost model).
+      const existing = results.get(neighborPath);
+      const isResolutionUpgrade = existing?.resolution === 'summary' && resolution === 'full';
 
       if (prevMin === undefined || nextLogicalHops < prevMin || isResolutionUpgrade) {
         minLogicalHops.set(neighborId, nextLogicalHops);
