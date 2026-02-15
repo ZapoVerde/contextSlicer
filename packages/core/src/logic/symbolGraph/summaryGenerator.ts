@@ -1,20 +1,20 @@
 /**
  * @file packages/core/src/logic/symbolGraph/summaryGenerator.ts
- * @stamp {"ts":"2026-02-15T09:15:00Z"}
+ * @stamp {"ts":"2026-02-15T10:15:00Z"}
  * @architectural-role Business Logic
  * @description
- * Transforms a file's Abstract Syntax Tree (AST) into a distilled semantic summary.
- * It classifies files into architectural patterns and extracts locally defined
- * types to preserve contract clarity. Updated to provide a "Developer Brief" 
- * format optimized for AI context and token efficiency.
+ * Distills a file's source code into a semantic architectural brief. It extracts 
+ * the primary documentation block (the "Intent"), public API surfaces (the "Contract"), 
+ * and critical type definitions. This summary is used for distant dependencies 
+ * to preserve context while minimizing token consumption.
  * 
  * @core-principles
  * 1. IS a pure, stateless engine for architectural distillation.
- * 2. OWNS the heuristic for classifying files into [TRANSFORM], [CONSUME], [GENERATE], or [PASSTHROUGH].
- * 3. MUST prioritize symbol provenance (source paths) and type surfaces.
+ * 2. MUST prioritize human-written intent (docblocks) over raw implementation.
+ * 3. ENFORCES token efficiency by truncating large type definitions.
  * 
  * @api-declaration
- *   export function generateSummary(filePath: string, ast: any, sourceCode: string): string;
+ *   export function generateSummary(filePath: string, ast: File, sourceCode: string): string;
  * 
  * @contract
  *   assertions:
@@ -41,23 +41,18 @@ export function generateSummary(filePath: string, ast: File, sourceCode: string)
   const internalInputs: SymbolProvenance[] = [];
   const outputs = new Set<string>();
   const typeDefinitions: string[] = [];
-  let purpose = '';
 
-  // 1. Identify Architectural Wormholes
+  // 1. Identify Architectural Wormholes (Barrels)
   if (isBarrelFile(ast)) {
-    return `=== ${filePath} ===\n\n[PASSTHROUGH]\nPurpose: Pure organizational barrel or re-export pipe.`;
+    return `=== ${filePath} ===\n[SUMMARY - Dependency Brief]\n\n[PASSTHROUGH]\nPurpose: Pure organizational barrel or re-export pipe.`;
   }
 
-  // 2. Extract Purpose (Heuristic: First block comment or leading JSDoc)
-  const leadingComments = ast.program.body[0]?.leadingComments;
-  if (leadingComments && leadingComments.length > 0) {
-    const firstComment = leadingComments[0].value.trim();
-    // Clean up JSDoc stars
-    purpose = firstComment.replace(/^\*+/, '').replace(/\n\s*\*+/g, '\n').trim().split('\n')[0];
-  }
+  // 2. Extract Intent (The full first block comment)
+  const firstBlockComment = ast.comments?.find(c => c.type === 'CommentBlock');
+  const docblock = firstBlockComment ? `/*${firstBlockComment.value}*/` : '';
 
+  // 3. Extract API Contract via AST
   traverse(ast, {
-    // Collect Inputs with Provenance
     ImportDeclaration(path) {
       const source = path.node.source.value;
       path.node.specifiers.forEach((spec) => {
@@ -76,7 +71,6 @@ export function generateSummary(filePath: string, ast: File, sourceCode: string)
       });
     },
 
-    // Collect Public Outputs (Exports)
     ExportNamedDeclaration(path) {
       if (path.node.declaration) {
         const decl = path.node.declaration;
@@ -84,8 +78,8 @@ export function generateSummary(filePath: string, ast: File, sourceCode: string)
           decl.declarations.forEach((d) => {
             if (d.id.type === 'Identifier') outputs.add(d.id.name);
           });
-        } else if ('id' in decl && decl.id?.type === 'Identifier') {
-          outputs.add(decl.id.name);
+        } else if ('id' in decl && (decl as any).id?.type === 'Identifier') {
+          outputs.add((decl as any).id.name);
         }
       }
       path.node.specifiers.forEach((spec) => {
@@ -94,23 +88,25 @@ export function generateSummary(filePath: string, ast: File, sourceCode: string)
         }
       });
     },
+
     ExportDefaultDeclaration() {
       outputs.add('default');
     },
 
-    // Extract Type Surfaces (with token optimization)
     TSInterfaceDeclaration(path) {
       typeDefinitions.push(summarizeTypeNode(sourceCode, path.node));
     },
+
     TSTypeAliasDeclaration(path) {
       typeDefinitions.push(summarizeTypeNode(sourceCode, path.node));
     },
+
     TSEnumDeclaration(path) {
       typeDefinitions.push(summarizeTypeNode(sourceCode, path.node));
     }
   });
 
-  // 3. Pattern Classification
+  // 4. Determine Architectural Pattern
   let pattern = 'TRANSFORM';
   if (outputs.size > 0 && internalInputs.length === 0) {
     pattern = 'GENERATE';
@@ -120,11 +116,16 @@ export function generateSummary(filePath: string, ast: File, sourceCode: string)
     pattern = 'ISOLATED';
   }
 
-  // 4. Formatting Assembly
-  const brief: string[] = [`=== ${filePath} ===`];
-  
-  if (purpose) {
-    brief.push(`Purpose: ${purpose}`);
+  // 5. Assembly
+  const brief: string[] = [
+    `=== ${filePath} ===`,
+    `[SUMMARY - Dependency Brief]`,
+    ''
+  ];
+
+  if (docblock) {
+    brief.push(docblock);
+    brief.push('');
   }
 
   if (internalInputs.length > 0) {
@@ -146,8 +147,8 @@ export function generateSummary(filePath: string, ast: File, sourceCode: string)
 }
 
 /**
- * Summarizes a type definition to its essential surface to save tokens.
- * Truncates long bodies but preserves field names and basic inheritance.
+ * Summarizes a type definition surface to save tokens.
+ * Preserves the name and structure but truncates deeply nested bodies.
  */
 function summarizeTypeNode(source: string, node: any): string {
   if (node.start === null || node.end === null) return '';
@@ -155,9 +156,8 @@ function summarizeTypeNode(source: string, node: any): string {
   const raw = source.slice(node.start, node.end);
   const lines = raw.split('\n');
   
-  if (lines.length <= 8) return raw;
+  if (lines.length <= 10) return raw;
 
-  // Pattern: Extract header and first few fields, then truncate
   const header = lines[0];
   const tail = lines[lines.length - 1];
   const visibleFields = lines.slice(1, 4).map(l => l.trim()).join('\n    ');

@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/index.ts
- * @stamp {"ts":"2026-02-14T16:20:00Z"}
+ * @stamp {"ts":"2026-02-15T16:55:00Z"}
  * @architectural-role Feature Entry Point
  * @description
  * The composition root for the Context Query Panel's logic. Orchestrates the 
- * integration of primitive state (including dual-resolution thresholds), 
- * derived view-models, and complex business actions.
+ * integration of primitive state, derived selectors, and complex business 
+ * actions, including the new resolution reconciliation warnings.
  *
  * @core-principles
  * 1. IS the public entry point for the Query Panel's headless logic.
@@ -49,6 +49,7 @@ export function useQueryPanelState(): QueryPanelHookResult {
     setIsLoading,
     setError,
     setSuccessMessage,
+    setResolutionWarnings,
     setCheckedDocsFolders,
   } = useQueryState();
 
@@ -61,6 +62,7 @@ export function useQueryPanelState(): QueryPanelHookResult {
     setError,
     setIsLoading,
     setSuccessMessage,
+    setResolutionWarnings,
   });
 
   // 4. Specialized Toggle Handler
@@ -73,7 +75,7 @@ export function useQueryPanelState(): QueryPanelHookResult {
 
   // 5. Final API Composition
   return {
-    // Current State
+    // Current State (includes resolutionWarnings)
     ...state,
     // Derived View Data
     ...derived,
@@ -86,6 +88,7 @@ export function useQueryPanelState(): QueryPanelHookResult {
     setPassiveOutputMode,
     setWildcardQuery,
     setExclusionWildcardQuery,
+    setResolutionWarnings,
     // Orchestrated Actions
     handleDocsFolderToggle,
     handleGenerate,

@@ -1,10 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/types.ts
- * @stamp {"ts":"2026-02-14T15:45:00Z"}
+ * @stamp {"ts":"2026-02-15T16:15:00Z"}
  * @architectural-role Type Definition
  * @description
  * Defines the shared types, interfaces, and state shapes for the Context Query 
- * Panel's logic layer. Updated to support dual-resolution ticker state.
+ * Panel's logic layer. Updated to support dual-resolution ticker state and 
+ * non-fatal resolution warnings (conflicts).
  * 
  * @core-principles
  * 1. IS the single source of truth for query-related types.
@@ -56,6 +57,8 @@ export interface QueryPanelState {
   isLoading: boolean;
   error: string;
   successMessage: string;
+  /** Non-fatal warnings about resolution conflicts (e.g., path requested as both Full and Summary) */
+  resolutionWarnings: string[];
   checkedDocsFolders: Record<string, boolean>;
 }
 
@@ -69,7 +72,9 @@ export interface QueryPanelDerivedState {
   presets: QueryPanelPreset[];
   isReady: boolean;
   canGenerate: boolean;
+  /** The current health status of the global dependency graph build. */
   graphStatus: 'idle' | 'building' | 'ready' | 'error';
+  /** Fatal or structural errors from the global graph builder. */
   resolutionErrors: string[];
 }
 
@@ -86,6 +91,7 @@ export interface QueryPanelActions {
   setPassiveOutputMode: (val: PassiveOutputMode) => void;
   setWildcardQuery: (val: string) => void;
   setExclusionWildcardQuery: (val: string) => void;
+  setResolutionWarnings: (val: string[]) => void;
   handleDocsFolderToggle: (folderName: string) => void;
   handleGenerate: (mode: UpdateMode) => Promise<void>;
   handleApplyPreset: (preset: QueryPanelPreset) => void;

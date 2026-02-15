@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/useQueryState.ts
- * @stamp {"ts":"2026-02-15T01:00:00Z"}
+ * @stamp {"ts":"2026-02-15T16:25:00Z"}
  * @architectural-role State Logic
  * @description
  * Manages the primitive UI state for the Context Query Panel. This internal hook 
- * acts as the state container for user inputs, including the dual-resolution 
- * thresholds (traceDepth and summaryTraceDepth), loading status, and feedback.
+ * acts as the state container for user inputs, including thresholds, loading status, 
+ * feedback, and resolution conflict warnings.
  *
  * @core-principles
  * 1. OWNS the primitive UI state for query parameters.
@@ -15,7 +15,7 @@
  * @contract
  *   assertions:
  *     purity: mutates # Standard React state management.
- *     state_ownership: [traceQuery, traceDirection, traceDepth, summaryTraceDepth, ...]
+ *     state_ownership: [traceQuery, traceDirection, traceDepth, summaryTraceDepth, resolutionWarnings, ...]
  *     external_io: none
  */
 
@@ -27,16 +27,13 @@ import type { TraceDirection, QueryPanelState } from './types';
  * @id packages/core/src/components/hooks/useQueryPanelState/useQueryState.ts#useQueryState
  * @description
  * Initializes and manages all local state variables required by the Query Panel.
- * Defaults are set to provide a tight initial context gradient (1:2).
  */
 export function useQueryState() {
   const [traceQuery, setTraceQuery] = useState<string | null>(null);
   const [traceDirection, setTraceDirection] = useState<TraceDirection>('both');
   
   // Resolution Boundaries
-  // Defaulting to 1 hop for Full Extraction (Seed + Direct Neighbors)
   const [traceDepth, setTraceDepth] = useState<number>(1);
-  // Defaulting to 2 hops for Summary extraction (Distant Neighbors)
   const [summaryTraceDepth, setSummaryTraceDepth] = useState<number>(2);
   
   const [traceMode, setTraceMode] = useState<TraceMode>('logical');
@@ -47,6 +44,7 @@ export function useQueryState() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [resolutionWarnings, setResolutionWarnings] = useState<string[]>([]);
   const [checkedDocsFolders, setCheckedDocsFolders] = useState<Record<string, boolean>>({});
 
   // Construct state object matching the QueryPanelState interface
@@ -62,6 +60,7 @@ export function useQueryState() {
     isLoading,
     error,
     successMessage,
+    resolutionWarnings,
     checkedDocsFolders,
   };
 
@@ -78,6 +77,7 @@ export function useQueryState() {
     setIsLoading,
     setError,
     setSuccessMessage,
+    setResolutionWarnings,
     setCheckedDocsFolders,
   };
 }

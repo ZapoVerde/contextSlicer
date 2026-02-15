@@ -1,16 +1,25 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/packAssembler.ts
- * @stamp {"ts":"2026-02-15T11:15:00Z"}
- * @architectural-role Business Logic / Service
+ * @stamp {"ts":"2026-02-15T10:30:00Z"}
+ * @architectural-role Business Logic / Orchestrator
  * @description
- * Orchestrates the assembly of the Three-Layer Context Pack. It combines the 
- * spatial map, external boundary types, and implementation logic into a single 
- * high-signal document optimized for LLM context windows.
+ * Orchestrates the construction of the multi-layered context pack. It applies a 
+ * resolution gradient: "Seed" files receive full implementation markers, 
+ * while distant dependencies are distilled into semantic architectural briefs. 
+ * Discovered external symbols are resolved via a Project Boundary Library.
  * 
  * @core-principles
- * 1. ENFORCES the Three-Layer architectural sequence (Spatial -> Library -> Logic).
- * 2. MUST prioritize token efficiency by using summaries for distant dependencies.
- * 3. IS a pure service that operates on pre-loaded data to ensure deterministic output.
+ * 1. ENFORCES mutual exclusivity: a file is either a Seed or a Summary, never both.
+ * 2. MUST prioritize the "Signal-to-Noise" ratio by using minimal markers.
+ * 3. OWNS the final composition and layering of the context document.
+ * 
+ * @api-declaration
+ *   export async function assembleContextPack(
+ *     fileIndex: Map<string, FileEntry>,
+ *     targets: TargetedPath[],
+ *     preFlightResults: Map<string, PreFlightResult>,
+ *     options: AssemblerOptions
+ *   ): Promise<string>;
  * 
  * @contract
  *   assertions:
@@ -18,87 +27,127 @@
  *     external_io: none
  */
 
+import * as parser from '@babel/parser';
 import { generateFileTree } from '../../../logic/fileTreeUtils';
-import { extractFilePreamble } from '../../../logic/preambleUtils';
-import { generateSummary } from '../../../logic/symbolGraph/summaryGenerator';
-import { scanBoundaries, type SelectedFileMap } from '../../../logic/symbolGraph/boundaryScanner';
-import { generateBoundaryLibrary } from '../../../logic/symbolGraph/typeDefinitionExtractor';
+import { 
+  generateSummary,
+  scanBoundaries, 
+  generateBoundaryLibrary 
+} from '../../../logic/symbolGraph';
 import type { FileEntry } from '../../../state/slicer-state';
-import type { TargetedPath, PreFlightResult } from './types';
+import type { 
+  TargetedPath, 
+  PreFlightResult 
+} from './types';
+import type { File } from '@babel/types';
 
 interface AssemblerOptions {
   docblocksOnly: boolean;
+  includeBoundaryLibrary: boolean;
 }
 
 /**
  * @id packages/core/src/components/hooks/useTargetedPackManager/packAssembler.ts#assembleContextPack
  * @description
- * Compiles the final context pack string. It resolves boundaries using the 
- * pre-parsed ASTs and applies the requested resolution levels (Full vs Summary) 
- * to the source logic layer.
+ * Builds the final context pack string. It iterates through targets to build 
+ * Source Logic and performs a boundary scan on Seed files to generate the 
+ * Layer 1.5 Boundary Library.
  */
 export async function assembleContextPack(
-  targets: TargetedPath[],
-  preFlightData: PreFlightResult[],
   fileIndex: Map<string, FileEntry>,
+  targets: TargetedPath[],
+  preFlightResults: Map<string, PreFlightResult>,
   options: AssemblerOptions
 ): Promise<string> {
-  // 1. Prepare Lookup Maps from Pre-Flight Data
-  const contentMap = new Map<string, string>();
-  const astMap: SelectedFileMap = new Map();
+  const pack: string[] = [];
+  const selectedFilesForBoundaryScan: Map<string, File> = new Map();
 
-  preFlightData.forEach(res => {
-    contentMap.set(res.path, res.content);
-    if (res.ast) {
-      astMap.set(res.path, res.ast);
-    }
-  });
-
-  // --- LAYER 2: BOUNDARY DISCOVERY ---
-  // Scan for external symbols that cross the context boundary
-  const boundarySymbols = scanBoundaries(fileIndex, astMap);
-  const boundaryLibrary = await generateBoundaryLibrary(fileIndex, boundarySymbols);
-
-  // --- LAYER 3: SOURCE LOGIC ASSEMBLY ---
-  // Process each target based on its resolution mode
-  const logicParts = targets.map((target) => {
-    const content = contentMap.get(target.path);
-    const ast = astMap.get(target.path);
-
-    if (!content) {
-      return `// ----- ${target.path} (ERROR) -----\n// Content not found during assembly phase.`;
-    }
-
-    // Resolution: Summary (Architectural Distillation)
-    if (target.resolution === 'summary') {
-      if (ast) {
-        return generateSummary(target.path, ast, content);
-      }
-      return `// ----- ${target.path} (FALLBACK) -----\n// AST parsing failed; summary unavailable.`;
-    }
-
-    // Resolution: Full Text (Implementation)
-    let processedContent = content;
-    if (options.docblocksOnly) {
-      const preamble = extractFilePreamble(content);
-      processedContent = preamble || '// (No docblock found at file start)';
-    }
-
-    return `// ----- ${target.path} -----\n${processedContent}`;
-  });
-
-  // --- LAYER 1: SPATIAL MAP ---
+  // 1. Layer 1: Spatial Map
   const tree = generateFileTree(targets.map(t => t.path));
+  pack.push('--- START OF CONTEXT PACK ---');
+  pack.push('\n--- LAYER 1: SPATIAL MAP ---\n');
+  pack.push('```text');
+  pack.push(tree);
+  pack.push('```');
 
-  const timestamp = new Date().toISOString();
-  return [
-    `--- START OF CONTEXT PACK - ${timestamp} ---`,
-    `--- LAYER 1: SPATIAL MAP ---`,
-    tree,
-    `--- LAYER 2: BOUNDARY LIBRARY ---`,
-    boundaryLibrary || '// No external symbols crossing the boundary detected.',
-    `--- LAYER 3: SOURCE LOGIC ---`,
-    ...logicParts,
-    '--- END OF PACK ---'
-  ].join('\n\n');
+  // Layer 2 Marker (Reference for splice insertion)
+  const sourceLogicMarker = '\n--- LAYER 2: SOURCE LOGIC ---\n';
+  pack.push(sourceLogicMarker);
+
+  // 2. Process Files
+  for (const target of targets) {
+    const fileEntry = fileIndex.get(target.path);
+    const preFlight = preFlightResults.get(target.path);
+    
+    if (!fileEntry || !preFlight) continue;
+
+    if (target.resolution === 'full') {
+      // PATTERN A: THE SEED (Full Implementation)
+      pack.push(`=== ${target.path} ===`);
+      pack.push(`[SEED - Full Implementation]`);
+      pack.push('');
+      pack.push(preFlight.content);
+      pack.push(`\n--- END OF FILE ---\n`);
+      
+      // Collect AST for Layer 1.5 Boundary Discovery
+      if (preFlight.ast) {
+        selectedFilesForBoundaryScan.set(target.path, preFlight.ast);
+      }
+    } else {
+      // PATTERN B: THE DEPENDENCY (Summary Brief)
+      let ast = preFlight.ast;
+      
+      // Parse on the fly if pre-flight AST is missing (uncommon but possible)
+      if (!ast) {
+        try {
+          ast = parser.parse(preFlight.content, {
+            sourceType: 'module',
+            plugins: ['typescript', 'jsx'],
+          });
+        } catch {
+          ast = null;
+        }
+      }
+
+      if (ast) {
+        const summary = generateSummary(target.path, ast, preFlight.content);
+        pack.push(summary);
+        pack.push('\n');
+      } else {
+        // Fallback for files that completely fail parsing
+        pack.push(`=== ${target.path} ===`);
+        pack.push(`[SUMMARY - Parse Failure]`);
+        pack.push(`// Content omitted due to syntax errors.\n`);
+      }
+    }
+  }
+
+  // 3. Layer 1.5: Project Boundary Library
+  // We scan the symbols imported by our Seeds that are NOT in the selection.
+  if (options.includeBoundaryLibrary && selectedFilesForBoundaryScan.size > 0) {
+    const boundarySymbols = scanBoundaries(
+      fileIndex,
+      selectedFilesForBoundaryScan
+    );
+
+    if (boundarySymbols.length > 0) {
+      const boundaryLibrary = await generateBoundaryLibrary(
+        fileIndex, 
+        boundarySymbols
+      );
+      
+      if (boundaryLibrary) {
+        const markerIndex = pack.indexOf(sourceLogicMarker);
+        pack.splice(markerIndex, 0, 
+          '\n--- LAYER 1.5: BOUNDARY LIBRARY ---\n',
+          boundaryLibrary,
+          '\n'
+        );
+      }
+    }
+  }
+
+  pack.push('--- END OF PACK ---');
+
+  return pack.join('\n');
 }

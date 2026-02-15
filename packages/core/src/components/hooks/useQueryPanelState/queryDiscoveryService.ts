@@ -1,15 +1,16 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
- * @stamp {"ts":"2026-02-14T16:10:00Z"}
+ * @stamp {"ts":"2026-02-15T16:10:00Z"}
  * @architectural-role Business Logic
  * @description
  * A pure service that calculates the final set of file paths for a context pack.
  * Encapsulates the logic for seed collection, dual-resolution graph traversal, 
- * and resolution tagging (suffixing paths with :summary).
+ * and resolution reconciliation. It detects and warns about conflicting 
+ * instructions (e.g., a file targeted as both Full and Summary).
  *
  * @core-principles
  * 1. IS a framework-agnostic logic engine for file discovery.
- * 2. MUST append :summary to paths designated for semantic extraction.
+ * 2. MUST identify and warn about conflicting resolution instructions for the same path.
  * 3. OWNS the coordination of tracing modes and exclusion rules.
  *
  * @api-declaration
@@ -17,7 +18,7 @@
  *     fileIndex: Map<string, FileEntry>,
  *     symbolGraph: SymbolGraph | null,
  *     state: QueryPanelState
- *   ): Promise<{ paths: string[]; traceWarning: string }>;
+ *   ): Promise<{ paths: string[]; traceWarning: string; resolutionWarnings: string[] }>;
  *
  * @contract
  *   assertions:
@@ -26,7 +27,7 @@
  */
 
 import type { FileEntry } from '../../../state/slicer-state';
-import type { SymbolGraph } from '../../../logic/symbolGraph/types';
+import type { SymbolGraph, ResolutionLevel } from '../../../logic/symbolGraph/types';
 import { traceSymbolGraph } from '../../../logic/symbolGraph';
 import { wildcardToRegExp } from '../../../logic/wildcardUtils';
 import { getFilesForCheckedFolders } from '../../../logic/docsFolderLogic';
@@ -37,20 +38,47 @@ import type { QueryPanelState } from './types';
 /**
  * @id packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts#discoverContextPaths
  * @description
- * Executes the full discovery pipeline: Seed -> Dual-Resolution Trace -> Sieve.
+ * Executes the full discovery pipeline: Seed Collection -> Dual-Resolution Trace -> 
+ * Reconciliation & Sieve. Identifies resolution conflicts between seeds and traces.
  */
 export async function discoverContextPaths(
   fileIndex: Map<string, FileEntry>,
   symbolGraph: SymbolGraph | null,
   state: QueryPanelState
-): Promise<{ paths: string[]; traceWarning: string }> {
-  const seedPaths = new Set<string>();
+): Promise<{ paths: string[]; traceWarning: string; resolutionWarnings: string[] }> {
   const allFilePaths = Array.from(fileIndex.keys());
   let traceWarning = '';
 
+  /**
+   * instructionMap: Handles silent de-duplication of exact instruction strings.
+   * Key: "path" or "path:summary"
+   * Value: ResolutionLevel
+   */
+  const instructionMap = new Map<string, ResolutionLevel>();
+
+  /**
+   * identityMap: Tracks all requested resolutions for a physical path to detect conflicts.
+   * Key: "path"
+   * Value: Set of ResolutionLevels
+   */
+  const identityMap = new Map<string, Set<ResolutionLevel>>();
+
+  const addInstruction = (path: string, resolution: ResolutionLevel) => {
+    const rawPath = path.split(':')[0]; // Sanity check for incoming strings
+    const instruction = resolution === 'summary' ? `${rawPath}:summary` : rawPath;
+
+    // Silent de-duplication of the instruction string
+    instructionMap.set(instruction, resolution);
+
+    // Track resolutions per physical identity
+    const resolutionSet = identityMap.get(rawPath) ?? new Set<ResolutionLevel>();
+    resolutionSet.add(resolution);
+    identityMap.set(rawPath, resolutionSet);
+  };
+
   // 1. Gather Seeds: Docs Folders (Defaults to Full Extraction)
   const docFiles = getFilesForCheckedFolders(fileIndex, state.checkedDocsFolders);
-  docFiles.forEach(path => seedPaths.add(path));
+  docFiles.forEach(path => addInstruction(path, 'full'));
 
   // 2. Gather Seeds: Wildcards (Defaults to Full Extraction)
   if (state.wildcardQuery.trim()) {
@@ -58,56 +86,42 @@ export async function discoverContextPaths(
     for (const pattern of patterns) {
       const regex = wildcardToRegExp(pattern);
       const matches = allFilePaths.filter(p => regex.test(p));
-      matches.forEach(m => seedPaths.add(m));
+      matches.forEach(m => addInstruction(m, 'full'));
     }
   }
 
   // 3. Gather Seeds: Trace Start
   if (state.traceQuery) {
-    seedPaths.add(state.traceQuery);
+    const startPath = state.traceQuery.split('#')[0];
+    addInstruction(startPath, 'full');
   }
-
-  // inclusionPaths stores the final path string with optional resolution suffix
-  const inclusionPaths = new Set<string>();
-  
-  // Seed files are always treated as 'full' (no suffix)
-  seedPaths.forEach(p => {
-    const pathOnly = p.split('#')[0];
-    inclusionPaths.add(pathOnly);
-  });
 
   // 4. Perform Dependency Trace
   const totalHops = Math.max(state.traceDepth, state.summaryTraceDepth);
-  if (totalHops > 0 && seedPaths.size > 0) {
+  if (totalHops > 0 && (state.traceQuery || docFiles.length > 0 || state.wildcardQuery.trim())) {
     if (symbolGraph) {
       if (state.traceMode === 'logical') {
         const graphFiles = Array.from(symbolGraph.values()).map(n => n.filePath);
         const astCache = await buildTemporaryAstCache(fileIndex, graphFiles);
 
-        for (const startNode of seedPaths) {
-          const initialScent = startNode.includes('#') ? startNode.split('#')[1] : undefined;
-          
-          const tracedNodes = traceLogicalPath(symbolGraph, astCache, startNode, {
+        // We trace from every unique physical path currently in our identity map
+        for (const startPath of identityMap.keys()) {
+          const tracedNodes = traceLogicalPath(symbolGraph, astCache, startPath, {
             mode: 'logical',
             direction: state.traceDirection,
             maxHops: state.traceDepth,
             summaryHops: state.summaryTraceDepth,
-            initialScent
           });
 
           tracedNodes.forEach(node => {
-            const pathWithResolution = node.resolution === 'summary' 
-              ? `${node.path}:summary` 
-              : node.path;
-            
-            inclusionPaths.add(pathWithResolution);
+            addInstruction(node.path, node.resolution);
           });
         }
       } else {
-        // Physical tracing - currently doesn't support dual resolution, defaults to full
-        for (const startNode of seedPaths) {
-          const tracedPaths = traceSymbolGraph(symbolGraph, startNode, state.traceDirection, state.traceDepth);
-          tracedPaths.forEach(p => inclusionPaths.add(p));
+        // Physical tracing fallback
+        for (const startPath of identityMap.keys()) {
+          const tracedPaths = traceSymbolGraph(symbolGraph, startPath, state.traceDirection, state.traceDepth);
+          tracedPaths.forEach(p => addInstruction(p, 'full'));
         }
       }
     } else {
@@ -115,22 +129,33 @@ export async function discoverContextPaths(
     }
   }
 
-  let finalPaths = Array.from(inclusionPaths);
+  // 5. Generate Resolution Warnings (Conflict Detection)
+  const resolutionWarnings: string[] = [];
+  identityMap.forEach((resolutions, path) => {
+    if (resolutions.size > 1) {
+      resolutionWarnings.push(
+        `Conflict: '${path}' is targeted as both Full and Summary. Both will be processed.`
+      );
+    }
+  });
 
-  // 5. Apply Exclusions (Sieve)
-  // Exclusions match against the raw path (ignoring resolution suffixes)
+  let finalInstructions = Array.from(instructionMap.keys());
+
+  // 6. Apply Exclusions (Sieve)
+  // Exclusions match against the physical path part of the instruction
   if (state.exclusionWildcardQuery.trim()) {
     const exclusionPatterns = state.exclusionWildcardQuery.split(',').map(p => p.trim()).filter(Boolean);
     const exclusionRegexes = exclusionPatterns.map(wildcardToRegExp);
     
-    finalPaths = finalPaths.filter(pathWithFlag => {
-      const rawPath = pathWithFlag.split(':')[0];
+    finalInstructions = finalInstructions.filter(instruction => {
+      const rawPath = instruction.split(':')[0];
       return !exclusionRegexes.some(regex => regex.test(rawPath));
     });
   }
 
   return {
-    paths: finalPaths,
-    traceWarning
+    paths: finalInstructions,
+    traceWarning,
+    resolutionWarnings
   };
 }

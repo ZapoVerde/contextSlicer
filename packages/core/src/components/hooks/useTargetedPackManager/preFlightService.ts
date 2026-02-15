@@ -1,17 +1,17 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/preFlightService.ts
- * @stamp {"ts":"2026-02-15T11:10:00Z"}
+ * @stamp {"ts":"2026-02-15T10:45:00Z"}
  * @architectural-role Business Logic / Service
  * @description
- * Provides the "Pre-Flight" engine that loads and parses a set of target files 
- * in parallel. It handles extension-based filtering to ensure only script files 
- * are passed to the Babel parser, preventing unnecessary overhead or crashes 
- * on assets/binary files.
+ * Provides the "Pre-Flight" engine that loads and parses target files in parallel. 
+ * Script files are parsed into Babel ASTs to support boundary scanning and 
+ * architectural distillation. Returns results in a Map for high-performance 
+ * correlation during the assembly phase.
  * 
  * @core-principles
  * 1. OWNS the parallelization strategy for context gathering.
  * 2. MUST ensure every file is fetched and parsed exactly once.
- * 3. IS a pure service that does not depend on React or global state.
+ * 3. IS a pure service that returning indexed results for assembly efficiency.
  * 
  * @contract
  *   assertions:
@@ -28,24 +28,25 @@ const SCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']
 /**
  * @id packages/core/src/components/hooks/useTargetedPackManager/preFlightService.ts#runPreFlight
  * @description
- * Executes a parallel load-and-parse sequence for all provided targets. 
- * Script files are parsed into Babel ASTs for downstream boundary scanning 
- * and architectural distillation.
+ * Executes a parallel load-and-parse sequence. Script files are parsed with 
+ * error recovery enabled to ensure a partial AST is available even for 
+ * invalid/draft code.
  * 
  * @param targets - The structured list of paths and their resolution modes.
  * @param fileIndex - The project's file registry.
+ * @returns A Map indexing file paths to their content and ASTs.
  */
 export async function runPreFlight(
   targets: TargetedPath[],
   fileIndex: Map<string, FileEntry>
-): Promise<PreFlightResult[]> {
+): Promise<Map<string, PreFlightResult>> {
   const tasks = targets.map(async (target): Promise<PreFlightResult | null> => {
     const entry = fileIndex.get(target.path);
     if (!entry) return null;
 
     try {
       const content = await entry.getText();
-      let ast: parser.ParseResult<import('@babel/types').File> | null = null;
+      let ast: any = null;
 
       const isScript = Array.from(SCRIPT_EXTENSIONS).some(ext => 
         target.path.toLowerCase().endsWith(ext)
@@ -66,7 +67,7 @@ export async function runPreFlight(
       return {
         path: target.path,
         content,
-        ast: ast as any // Casting to File | null for internal type compatibility
+        ast: ast // Babel types handle this internally
       };
     } catch (e) {
       console.error(`[PreFlight] I/O failure for: ${target.path}`, e);
@@ -74,6 +75,14 @@ export async function runPreFlight(
     }
   });
 
-  const results = await Promise.all(tasks);
-  return results.filter((r): r is PreFlightResult => r !== null);
+  const resultsArray = await Promise.all(tasks);
+  const resultsMap = new Map<string, PreFlightResult>();
+
+  for (const res of resultsArray) {
+    if (res) {
+      resultsMap.set(res.path, res);
+    }
+  }
+
+  return resultsMap;
 }

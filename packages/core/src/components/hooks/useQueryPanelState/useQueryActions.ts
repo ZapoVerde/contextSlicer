@@ -1,12 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/useQueryActions.ts
- * @stamp {"ts":"2026-02-14T16:35:00Z"}
+ * @stamp {"ts":"2026-02-15T16:40:00Z"}
  * @architectural-role State Logic / UI Controller
  * @description
  * Manages the interaction between the Query Panel's UI state and the global 
  * application store. Orchestrates the lifecycle of generation requests, 
- * ensuring the dependency graph is initialized when any tracing threshold (Full or Summary) 
- * is active.
+ * ensuring the dependency graph is initialized and capturing discovery warnings.
  *
  * @core-principles
  * 1. IS a UI controller responsible for managing side effects.
@@ -36,6 +35,7 @@ interface ActionDependencies {
   setError: (val: string) => void;
   setIsLoading: (val: boolean) => void;
   setSuccessMessage: (val: string) => void;
+  setResolutionWarnings: (val: string[]) => void;
 }
 
 /**
@@ -44,7 +44,7 @@ interface ActionDependencies {
  * Hook providing the high-level handlers for the Context Query UI.
  */
 export function useQueryActions(deps: ActionDependencies): Pick<QueryPanelActions, 'handleGenerate' | 'handleApplyPreset'> {
-  const { state, setError, setIsLoading, setSuccessMessage } = deps;
+  const { state, setError, setIsLoading, setSuccessMessage, setResolutionWarnings } = deps;
 
   // Granular Store Selectors
   const fileIndex = useSlicerStore(s => s.fileIndex);
@@ -88,23 +88,30 @@ export function useQueryActions(deps: ActionDependencies): Pick<QueryPanelAction
     setIsLoading(true);
     setError('');
     setSuccessMessage('');
+    setResolutionWarnings([]);
 
     try {
       // 1. Ensure the graph is ready if any tracing is requested
-      // We check both the inner (Full) and outer (Summary) thresholds
       if (state.traceDepth > 0 || state.summaryTraceDepth > 0) {
         await ensureSymbolGraph();
       }
 
       // 2. Delegate discovery to the service
       const currentGraph = useSlicerStore.getState().symbolGraph;
-      const { paths: discoveredPaths, traceWarning } = await discoverContextPaths(
+      const { 
+        paths: discoveredPaths, 
+        traceWarning, 
+        resolutionWarnings: discoveredWarnings 
+      } = await discoverContextPaths(
         fileIndex, 
         currentGraph, 
         state
       );
 
-      // 3. Coordinate Store Update
+      // 3. Surface non-fatal warnings
+      setResolutionWarnings(discoveredWarnings);
+
+      // 4. Coordinate Store Update
       let finalPaths: string[];
       if (mode === 'append') {
         const existingPaths = new Set(
@@ -118,7 +125,7 @@ export function useQueryActions(deps: ActionDependencies): Pick<QueryPanelAction
 
       setTargetedPathsInput(finalPaths.join(', '));
       
-      // 4. UI Feedback
+      // 5. UI Feedback
       const count = discoveredPaths.length;
       const logicalNote = state.traceMode === 'logical' ? ' (Logical)' : '';
       setSuccessMessage(
@@ -140,6 +147,7 @@ export function useQueryActions(deps: ActionDependencies): Pick<QueryPanelAction
     setError,
     setIsLoading,
     setSuccessMessage,
+    setResolutionWarnings,
     setTargetedPathsInput
   ]);
 
