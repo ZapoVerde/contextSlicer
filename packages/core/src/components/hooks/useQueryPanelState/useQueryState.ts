@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/useQueryState.ts
- * @stamp {"ts":"2026-02-14T12:45:00Z"}
+ * @stamp {"ts":"2026-02-14T15:55:00Z"}
  * @architectural-role State Logic
  * @description
  * Manages the primitive UI state for the Context Query Panel. This internal hook 
- * acts as the state container for user inputs, loading status, and UI feedback 
- * messages.
+ * acts as the state container for user inputs, including the dual-resolution 
+ * thresholds (traceDepth and summaryTraceDepth), loading status, and feedback.
  *
  * @core-principles
  * 1. OWNS the primitive UI state for query parameters.
@@ -15,7 +15,7 @@
  * @contract
  *   assertions:
  *     purity: mutates # Standard React state management.
- *     state_ownership: [traceQuery, traceDirection, traceDepth, ...]
+ *     state_ownership: [traceQuery, traceDirection, traceDepth, summaryTraceDepth, ...]
  *     external_io: none
  */
 
@@ -31,7 +31,11 @@ import type { TraceDirection, QueryPanelState } from './types';
 export function useQueryState() {
   const [traceQuery, setTraceQuery] = useState<string | null>(null);
   const [traceDirection, setTraceDirection] = useState<TraceDirection>('both');
+  
+  // Resolution Boundaries
   const [traceDepth, setTraceDepth] = useState<number>(1);
+  const [summaryTraceDepth, setSummaryTraceDepth] = useState<number>(1);
+  
   const [traceMode, setTraceMode] = useState<TraceMode>('logical');
   const [passiveOutputMode, setPassiveOutputMode] = useState<PassiveOutputMode>('meta');
   
@@ -42,11 +46,12 @@ export function useQueryState() {
   const [successMessage, setSuccessMessage] = useState('');
   const [checkedDocsFolders, setCheckedDocsFolders] = useState<Record<string, boolean>>({});
 
-  // Pack the state for easier consumption by the composition root
+  // Construct state object matching the QueryPanelState interface
   const state: QueryPanelState = {
     traceQuery,
     traceDirection,
     traceDepth,
+    summaryTraceDepth,
     traceMode,
     passiveOutputMode,
     wildcardQuery,
@@ -62,6 +67,7 @@ export function useQueryState() {
     setTraceQuery,
     setTraceDirection,
     setTraceDepth,
+    setSummaryTraceDepth,
     setTraceMode,
     setPassiveOutputMode,
     setWildcardQuery,

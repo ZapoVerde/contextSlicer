@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/types.ts
- * @stamp {"ts":"2026-02-14T12:30:00Z"}
+ * @stamp {"ts":"2026-02-14T15:45:00Z"}
  * @architectural-role Type Definition
  * @description
  * Defines the shared types, interfaces, and state shapes for the Context Query 
- * Panel's logic layer. 
- *
+ * Panel's logic layer. Updated to support dual-resolution ticker state.
+ * 
  * @core-principles
  * 1. IS the single source of truth for query-related types.
  * 2. ENFORCES consistency between the state hooks and the UI components.
@@ -19,6 +19,12 @@
 
 import type { TraceMode, PassiveOutputMode } from '../../../logic/symbolGraph/types';
 import type { Preset } from '../../../state/slicer-state';
+
+/**
+ * @id packages/core/src/components/hooks/useQueryPanelState/types.ts#QueryPanelPreset
+ * @description Alias for the system-level Preset type, scoped to the Query Panel.
+ */
+export type QueryPanelPreset = Preset;
 
 /**
  * @id packages/core/src/components/hooks/useQueryPanelState/types.ts#TraceDirection
@@ -39,7 +45,10 @@ export type UpdateMode = 'append' | 'replace';
 export interface QueryPanelState {
   traceQuery: string | null;
   traceDirection: TraceDirection;
+  /** Inner threshold for Full Extraction */
   traceDepth: number;
+  /** Outer threshold for Summary extraction */
+  summaryTraceDepth: number;
   traceMode: TraceMode;
   passiveOutputMode: PassiveOutputMode;
   wildcardQuery: string;
@@ -57,7 +66,7 @@ export interface QueryPanelState {
 export interface QueryPanelDerivedState {
   docsFolders: string[];
   symbolOptions: readonly string[];
-  presets: Preset[];
+  presets: QueryPanelPreset[];
   isReady: boolean;
   canGenerate: boolean;
   graphStatus: 'idle' | 'building' | 'ready' | 'error';
@@ -72,13 +81,14 @@ export interface QueryPanelActions {
   setTraceQuery: (val: string | null) => void;
   setTraceDirection: (val: TraceDirection) => void;
   setTraceDepth: (val: number) => void;
+  setSummaryTraceDepth: (val: number) => void;
   setTraceMode: (val: TraceMode) => void;
   setPassiveOutputMode: (val: PassiveOutputMode) => void;
   setWildcardQuery: (val: string) => void;
   setExclusionWildcardQuery: (val: string) => void;
   handleDocsFolderToggle: (folderName: string) => void;
   handleGenerate: (mode: UpdateMode) => Promise<void>;
-  handleApplyPreset: (preset: Preset) => void;
+  handleApplyPreset: (preset: QueryPanelPreset) => void;
 }
 
 /**

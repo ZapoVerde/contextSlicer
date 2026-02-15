@@ -51,8 +51,22 @@ describe('traceLogicalPath (Augmented)', () => {
    */
   mockAstCache.set('App.tsx', parseToAst("import { LogicA } from './index';"));
   mockAstCache.set('index.ts', parseToAst("export * from './LogicA';"));
-  mockAstCache.set('LogicA.tsx', parseToAst("import { LogicB } from './LogicB'; export const LogicA = (data) => <div>{data.name}</div>;"));
-  mockAstCache.set('LogicB.tsx', parseToAst("export const LogicB = () => <div />;"));
+  
+  // LogicA is meaningful because it accesses data.id
+  mockAstCache.set('LogicA.tsx', parseToAst(`
+    import { LogicB } from './LogicB'; 
+    export const LogicA = (data) => {
+      console.log(data.id);
+      return <LogicB data={data} />;
+    };
+  `));
+  
+  // LogicB is meaningful because it accesses data.name
+  mockAstCache.set('LogicB.tsx', parseToAst(`
+    export const LogicB = (data) => {
+      return <div>{data.name}</div>;
+    };
+  `));
 
   const graph: SymbolGraph = new Map();
   graph.set('App.tsx', createNode('App.tsx', 'App.tsx', '(file)', ['index.ts']));
@@ -73,11 +87,13 @@ describe('traceLogicalPath (Augmented)', () => {
     const logicAResult = results.find(r => r.path === 'LogicA.tsx');
     const logicBResult = results.find(r => r.path === 'LogicB.tsx');
 
-    // LogicA is at logical hop 1 (index.ts is 0) -> should be FULL
+    // LogicA is reached via index.ts (cost 0). LogicA itself is meaningful (cost 1).
+    // Final depth for LogicA: 1.
     expect(logicAResult?.depth).toBe(1);
     expect(logicAResult?.resolution).toBe('full');
 
-    // LogicB is at logical hop 2 -> should be SUMMARY
+    // LogicB is reached from LogicA (depth 1). LogicB itself is meaningful (cost 1).
+    // Final depth for LogicB: 2.
     expect(logicBResult?.depth).toBe(2);
     expect(logicBResult?.resolution).toBe('summary');
   });
@@ -99,9 +115,9 @@ describe('traceLogicalPath (Augmented)', () => {
   });
 
   it('should summarize passive pipes that do not meaningfully interact with the scent', () => {
-    // Pipe.tsx: Purely forwards data
+    // Pipe.tsx: Purely forwards data (Exclusion B in flowAnalyzer)
     mockAstCache.set('Pipe.tsx', parseToAst("import { Final } from './Final'; export const Pipe = ({ data }) => <Final data={data} />;"));
-    mockAstCache.set('Final.tsx', parseToAst("export const Final = ({ data }) => <div>{data}</div>;"));
+    mockAstCache.set('Final.tsx', parseToAst("export const Final = ({ data }) => <div>{data.name}</div>;"));
     
     const pipeGraph: SymbolGraph = new Map();
     pipeGraph.set('Start.tsx', createNode('Start.tsx', 'Start.tsx', '(file)', ['Pipe.tsx']));
@@ -132,12 +148,12 @@ describe('traceLogicalPath (Augmented)', () => {
       mode: 'logical',
       direction: 'dependencies',
       maxHops: 0,
-      summaryHops: 1, // LogicA is depth 1
+      summaryHops: 1, 
       initialScent: 'data'
     });
 
     const paths = results.map(r => r.path);
-    expect(paths).toContain('LogicA.tsx');
-    expect(paths).not.toContain('LogicB.tsx'); // LogicB is depth 2
+    expect(paths).toContain('LogicA.tsx'); // LogicA depth is 1
+    expect(paths).not.toContain('LogicB.tsx'); // LogicB depth is 2
   });
 });

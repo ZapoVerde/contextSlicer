@@ -1,12 +1,12 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/useQueryActions.ts
- * @stamp {"ts":"2026-02-14T13:50:00Z"}
+ * @stamp {"ts":"2026-02-14T16:35:00Z"}
  * @architectural-role State Logic / UI Controller
  * @description
  * Manages the interaction between the Query Panel's UI state and the global 
- * application store. It orchestrates the lifecycle of generation requests, 
- * handling feedback, and store persistence while delegating core discovery 
- * logic to the QueryDiscoveryService.
+ * application store. Orchestrates the lifecycle of generation requests, 
+ * ensuring the dependency graph is initialized when any tracing threshold (Full or Summary) 
+ * is active.
  *
  * @core-principles
  * 1. IS a UI controller responsible for managing side effects.
@@ -48,7 +48,6 @@ export function useQueryActions(deps: ActionDependencies): Pick<QueryPanelAction
 
   // Granular Store Selectors
   const fileIndex = useSlicerStore(s => s.fileIndex);
-  const symbolGraph = useSlicerStore(s => s.symbolGraph);
   const targetedPathsInput = useSlicerStore(s => s.targetedPathsInput);
 
   // Granular Store Actions
@@ -91,8 +90,9 @@ export function useQueryActions(deps: ActionDependencies): Pick<QueryPanelAction
     setSuccessMessage('');
 
     try {
-      // 1. Ensure the graph is ready if tracing is requested
-      if (state.traceDepth > 0) {
+      // 1. Ensure the graph is ready if any tracing is requested
+      // We check both the inner (Full) and outer (Summary) thresholds
+      if (state.traceDepth > 0 || state.summaryTraceDepth > 0) {
         await ensureSymbolGraph();
       }
 

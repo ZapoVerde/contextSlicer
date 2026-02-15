@@ -1,10 +1,11 @@
 /**
  * @file packages/core/src/logic/symbolGraph/index.ts
- * @stamp {"ts":"2026-02-14T08:15:00Z"}
+ * @stamp {"ts":"2026-02-14T15:15:00Z"}
  * @architectural-role Feature Entry Point
  * @description
  * The public API barrel file for the symbol graph subsystem. Exposes the core
- * graph building logic and the advanced logical tracing engine.
+ * graph building logic, the advanced logical tracing engine, and the semantic
+ * summary generator.
  * 
  * @core-principles
  * 1. IS the definitive public interface for the symbol graph package.
@@ -12,8 +13,9 @@
  * 3. ENFORCES encapsulation of internal traversal complexities.
  * 
  * @api-declaration
- *   export { buildSymbolGraph } from './index'; // existing
+ *   export { buildSymbolGraph } from './index';
  *   export { traceLogicalPath } from './augmentedTracer';
+ *   export { generateSummary } from './summaryGenerator';
  *   export { isBarrelFile } from './analyzers/barrelDetector';
  *   export { analyzeFlow } from './flowAnalyzer';
  *   export * from './types';
@@ -28,12 +30,13 @@ import { PathResolver } from './pathResolver';
 import { runASTParser } from './astParser';
 import type { SymbolGraph, FileEntry } from './types';
 
-// Re-export types and the primary tracer
+// Re-export core tracing and distillation logic
 export * from './types';
 export { traceLogicalPath } from './augmentedTracer';
+export { generateSummary } from './summaryGenerator';
 export { isBarrelFile } from './analyzers/barrelDetector';
 export { analyzeFlow } from './analyzers/flowAnalyzer';
-export { traceSymbolGraph } from './tracer'; // Legacy tracer kept for compatibility
+export { traceSymbolGraph } from './tracer'; // Legacy tracer
 
 /**
  * @id packages/core/src/logic/symbolGraph/index.ts#buildSymbolGraph

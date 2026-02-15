@@ -1,16 +1,17 @@
 /**
  * @file packages/core/src/logic/symbolGraph/augmentedTracer.ts
- * @stamp {"ts":"2026-02-14T08:05:00Z"}
+ * @stamp {"ts":"2026-02-14T17:50:00Z"}
  * @architectural-role Business Logic
  * @description
  * The core logical tracing engine. Performs a BFS traversal of the symbol graph,
- * using AST analyzers to distinguish between logical junctions and passive pipes.
- * Enforces logical hop limits while allowing "free" passage through barrels.
+ * applying a dual-resolution gradient. Structural files (barrels/pipes) are 
+ * automatically summarized, while logic-bearing files are extracted in full or 
+ * summarized based on their logical distance from the seed.
  * 
  * @core-principles
- * 1. IS the primary engine for "Scent-Sensitive" tracing.
- * 2. ORCHESTRATES the use of barrel and flow analyzers during traversal.
- * 3. ENFORCES resource safety via a physical circuit breaker.
+ * 1. IS responsible for multi-resolution graph traversal.
+ * 2. ENFORCES the "Autosummarize" rule for structural passthroughs regardless of depth.
+ * 3. OWNS the transition logic between 'full' and 'summary' resolution levels.
  * 
  * @api-declaration
  *   export function traceLogicalPath(
@@ -26,11 +27,11 @@
  *     external_io: none
  */
 
-import type { SymbolGraph, TraceOptions, TracedNode, SymbolNode } from './types';
+import type { SymbolGraph, TraceOptions, TracedNode, SymbolNode, ResolutionLevel } from './types';
 import { isBarrelFile } from './analyzers/barrelDetector';
 import { analyzeFlow } from './analyzers/flowAnalyzer';
 
-const PHYSICAL_LIMIT = 50; // Hard limit to prevent infinite wormhole loops
+const PHYSICAL_LIMIT = 100; // Hard limit to prevent runaway loops in deep logical chains
 
 interface QueueItem {
   node: SymbolNode;
@@ -42,7 +43,8 @@ interface QueueItem {
 /**
  * @id packages/core/src/logic/symbolGraph/augmentedTracer.ts#traceLogicalPath
  * @description
- * Traces the dependency graph using logical hop counting.
+ * Traces the dependency graph using logical hop counting with dual-resolution output.
+ * Now includes detailed console logging for debugging.
  */
 export function traceLogicalPath(
   graph: SymbolGraph,
@@ -50,55 +52,62 @@ export function traceLogicalPath(
   startId: string,
   options: TraceOptions
 ): TracedNode[] {
+  console.groupCollapsed(`[Tracer] Starting trace from ${startId}`);
+  console.log('Options:', options);
+
   const startNodes = new Set<SymbolNode>();
   const initialScent = options.initialScent || '';
+  const totalMaxHops = Math.max(options.maxHops, options.summaryHops);
 
   // 1. Resolve starting points
   if (startId.includes('#')) {
     const node = graph.get(startId);
     if (node) startNodes.add(node);
   } else {
-    // Start from all symbols in the file
     graph.forEach(node => {
       if (node.filePath === startId) startNodes.add(node);
     });
   }
 
-  if (startNodes.size === 0) return [];
+  if (startNodes.size === 0) {
+    console.warn('[Tracer] No start nodes found.');
+    console.groupEnd();
+    return [];
+  }
 
   // 2. BFS Setup
   const queue: QueueItem[] = Array.from(startNodes).map(node => ({
     node,
     logicalHops: 0,
     physicalDepth: 0,
-    // FALLBACK: Use provided scent, or symbol name, or empty if it's a file node
     currentScent: initialScent || (node.symbolName === '(file)' ? '' : node.symbolName)
   }));
 
-  // Track the minimum logical hops found for each node to ensure we take the "cheapest" path
   const minLogicalHops = new Map<string, number>();
   const results = new Map<string, TracedNode>();
 
-  // Initialize starts
+  // Initialize seed nodes
   startNodes.forEach(n => {
     minLogicalHops.set(n.id, 0);
     results.set(n.filePath, {
       path: n.filePath,
       status: 'meaningful',
+      resolution: 'full', // Seeds are always full extraction targets
       scent: initialScent,
       depth: 0
     });
+    console.log(`[Seed] ${n.filePath}`);
   });
 
   let head = 0;
   while (head < queue.length) {
     const { node, logicalHops, physicalDepth, currentScent } = queue[head++];
 
-    if (logicalHops >= options.maxHops || physicalDepth >= PHYSICAL_LIMIT) {
+    if (logicalHops >= totalMaxHops || physicalDepth >= PHYSICAL_LIMIT) {
       continue;
     }
 
-    // Get neighbors based on direction
+    // Determine neighbors
     const neighbors = new Set<string>();
     if (options.direction === 'dependencies' || options.direction === 'both') {
       node.dependencies.forEach(id => neighbors.add(id));
@@ -117,50 +126,80 @@ export function traceLogicalPath(
       let isMeaningful = true;
       let nextScent = currentScent;
       let cost = 1;
+      let debugReason = 'Standard Link';
 
-      // 3. Logical Bypass Analysis
+      // 3. Logical Flow & Scent Analysis
       if (options.mode === 'logical' && ast) {
         if (isBarrelFile(ast)) {
           cost = 0;
           isMeaningful = false;
+          debugReason = 'Barrel File';
         } else if (currentScent) {
           const flow = analyzeFlow(ast, currentScent);
           cost = flow.isMeaningful ? 1 : 0;
           isMeaningful = flow.isMeaningful;
           nextScent = flow.nextIdentifier;
+          debugReason = flow.reason;
+        } else {
+          // No scent to follow, fallback to physical-like behavior
+          debugReason = 'No Scent (Physical fallback)';
         }
-      } else if (options.mode === 'physical') {
-        cost = 1;
-        isMeaningful = true;
       }
 
       const nextLogicalHops = logicalHops + cost;
 
-      // Only proceed if this path is within limits AND is cheaper (or equal) than any previously found path
+      // 4. Resolution Assignment (The Gradient Rule)
+      let resolution: ResolutionLevel = 'summary';
+      
+      if (!isMeaningful) {
+        resolution = 'summary'; // Rule: Passthroughs/Barrels are ALWAYS summarized
+      } else if (nextLogicalHops <= options.maxHops) {
+        resolution = 'full';
+      } else if (nextLogicalHops <= options.summaryHops) {
+        resolution = 'summary';
+      } else {
+        // Logging skipped items helps understand why the graph stops growing
+        // console.log(`[Skip] ${neighborPath} (Hops: ${nextLogicalHops} > Limit: ${options.summaryHops})`);
+        continue; // Outside logical bounds
+      }
+
+      // 5. Cheap-Path BFS Update
       const prevMin = minLogicalHops.get(neighborId);
-      if (nextLogicalHops <= options.maxHops && (prevMin === undefined || nextLogicalHops < prevMin)) {
-        minLogicalHops.set(neighborId, nextLogicalHops);
+      
+      // We update if we found a shorter path, OR if we found a path of equal length
+      // that upgrades the resolution (e.g., from summary to full).
+      if (nextLogicalHops <= totalMaxHops && (prevMin === undefined || nextLogicalHops <= prevMin)) {
         
-        // Update results: prioritizing 'meaningful' status if depths are equal
         const existing = results.get(neighborPath);
-        if (!existing || nextLogicalHops < existing.depth || (nextLogicalHops === existing.depth && isMeaningful)) {
+        const isResolutionUpgrade = existing && existing.resolution === 'summary' && resolution === 'full';
+        const isShorterPath = prevMin === undefined || nextLogicalHops < prevMin;
+
+        if (isShorterPath || isResolutionUpgrade) {
+          minLogicalHops.set(neighborId, nextLogicalHops);
+          
           results.set(neighborPath, {
             path: neighborPath,
             status: isMeaningful ? 'meaningful' : 'passive',
+            resolution,
             scent: nextScent,
             depth: nextLogicalHops
           });
-        }
 
-        queue.push({
-          node: neighborNode,
-          logicalHops: nextLogicalHops,
-          physicalDepth: physicalDepth + 1,
-          currentScent: nextScent
-        });
+          console.log(`[Add] ${neighborPath} | Depth: ${nextLogicalHops} | Type: ${resolution} | Reason: ${debugReason}`);
+
+          queue.push({
+            node: neighborNode,
+            logicalHops: nextLogicalHops,
+            physicalDepth: physicalDepth + 1,
+            currentScent: nextScent
+          });
+        }
       }
     }
   }
 
+  console.log(`[Tracer] Trace complete. Found ${results.size} unique files.`);
+  console.groupEnd();
+  
   return Array.from(results.values());
 }

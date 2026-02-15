@@ -1,15 +1,15 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
- * @stamp {"ts":"2026-02-14T13:40:00Z"}
+ * @stamp {"ts":"2026-02-14T16:10:00Z"}
  * @architectural-role Business Logic
  * @description
  * A pure service that calculates the final set of file paths for a context pack.
- * It encapsulates the logic for seed collection, graph traversal, and 
- * pattern-based filtering.
+ * Encapsulates the logic for seed collection, dual-resolution graph traversal, 
+ * and resolution tagging (suffixing paths with :summary).
  *
  * @core-principles
  * 1. IS a framework-agnostic logic engine for file discovery.
- * 2. MUST be stateless and side-effect free (returns values, doesn't update store).
+ * 2. MUST append :summary to paths designated for semantic extraction.
  * 3. OWNS the coordination of tracing modes and exclusion rules.
  *
  * @api-declaration
@@ -37,7 +37,7 @@ import type { QueryPanelState } from './types';
 /**
  * @id packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts#discoverContextPaths
  * @description
- * Executes the full discovery pipeline: Seed -> Trace -> Sieve.
+ * Executes the full discovery pipeline: Seed -> Dual-Resolution Trace -> Sieve.
  */
 export async function discoverContextPaths(
   fileIndex: Map<string, FileEntry>,
@@ -48,11 +48,11 @@ export async function discoverContextPaths(
   const allFilePaths = Array.from(fileIndex.keys());
   let traceWarning = '';
 
-  // 1. Gather Seeds: Docs Folders
+  // 1. Gather Seeds: Docs Folders (Defaults to Full Extraction)
   const docFiles = getFilesForCheckedFolders(fileIndex, state.checkedDocsFolders);
   docFiles.forEach(path => seedPaths.add(path));
 
-  // 2. Gather Seeds: Wildcards
+  // 2. Gather Seeds: Wildcards (Defaults to Full Extraction)
   if (state.wildcardQuery.trim()) {
     const patterns = state.wildcardQuery.split(',').map(p => p.trim()).filter(Boolean);
     for (const pattern of patterns) {
@@ -67,12 +67,18 @@ export async function discoverContextPaths(
     seedPaths.add(state.traceQuery);
   }
 
-  const inclusionPaths = new Set<string>(
-    Array.from(seedPaths).map(p => p.split('#')[0])
-  );
+  // inclusionPaths stores the final path string with optional resolution suffix
+  const inclusionPaths = new Set<string>();
+  
+  // Seed files are always treated as 'full' (no suffix)
+  seedPaths.forEach(p => {
+    const pathOnly = p.split('#')[0];
+    inclusionPaths.add(pathOnly);
+  });
 
   // 4. Perform Dependency Trace
-  if (state.traceDepth > 0 && seedPaths.size > 0) {
+  const totalHops = Math.max(state.traceDepth, state.summaryTraceDepth);
+  if (totalHops > 0 && seedPaths.size > 0) {
     if (symbolGraph) {
       if (state.traceMode === 'logical') {
         const graphFiles = Array.from(symbolGraph.values()).map(n => n.filePath);
@@ -85,16 +91,20 @@ export async function discoverContextPaths(
             mode: 'logical',
             direction: state.traceDirection,
             maxHops: state.traceDepth,
+            summaryHops: state.summaryTraceDepth,
             initialScent
           });
 
           tracedNodes.forEach(node => {
-            if (node.status === 'meaningful' || state.passiveOutputMode === 'full') {
-              inclusionPaths.add(node.path);
-            }
+            const pathWithResolution = node.resolution === 'summary' 
+              ? `${node.path}:summary` 
+              : node.path;
+            
+            inclusionPaths.add(pathWithResolution);
           });
         }
       } else {
+        // Physical tracing - currently doesn't support dual resolution, defaults to full
         for (const startNode of seedPaths) {
           const tracedPaths = traceSymbolGraph(symbolGraph, startNode, state.traceDirection, state.traceDepth);
           tracedPaths.forEach(p => inclusionPaths.add(p));
@@ -108,13 +118,15 @@ export async function discoverContextPaths(
   let finalPaths = Array.from(inclusionPaths);
 
   // 5. Apply Exclusions (Sieve)
+  // Exclusions match against the raw path (ignoring resolution suffixes)
   if (state.exclusionWildcardQuery.trim()) {
     const exclusionPatterns = state.exclusionWildcardQuery.split(',').map(p => p.trim()).filter(Boolean);
     const exclusionRegexes = exclusionPatterns.map(wildcardToRegExp);
     
-    finalPaths = finalPaths.filter(path => 
-      !exclusionRegexes.some(regex => regex.test(path))
-    );
+    finalPaths = finalPaths.filter(pathWithFlag => {
+      const rawPath = pathWithFlag.split(':')[0];
+      return !exclusionRegexes.some(regex => regex.test(rawPath));
+    });
   }
 
   return {

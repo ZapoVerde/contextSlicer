@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/index.ts
- * @stamp {"ts":"2026-02-14T13:20:00Z"}
+ * @stamp {"ts":"2026-02-14T16:20:00Z"}
  * @architectural-role Feature Entry Point
  * @description
- * The composition root for the Context Query Panel's logic. It orchestrates 
- * the integration of primitive state, derived view-models, and complex 
- * business actions.
+ * The composition root for the Context Query Panel's logic. Orchestrates the 
+ * integration of primitive state (including dual-resolution thresholds), 
+ * derived view-models, and complex business actions.
  *
  * @core-principles
  * 1. IS the public entry point for the Query Panel's headless logic.
@@ -41,6 +41,7 @@ export function useQueryPanelState(): QueryPanelHookResult {
     setTraceQuery,
     setTraceDirection,
     setTraceDepth,
+    setSummaryTraceDepth,
     setTraceMode,
     setPassiveOutputMode,
     setWildcardQuery,
@@ -80,6 +81,7 @@ export function useQueryPanelState(): QueryPanelHookResult {
     setTraceQuery,
     setTraceDirection,
     setTraceDepth,
+    setSummaryTraceDepth,
     setTraceMode,
     setPassiveOutputMode,
     setWildcardQuery,
@@ -91,5 +93,5 @@ export function useQueryPanelState(): QueryPanelHookResult {
   };
 }
 
-// Re-export types for external consumption if needed
+// Re-export types for external consumption
 export * from './types';

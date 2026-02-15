@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/logic/symbolGraph/analyzers/flowAnalyzer.ts
- * @stamp {"ts":"2026-02-14T07:45:00Z"}
+ * @stamp {"ts":"2026-02-14T17:45:00Z"}
  * @architectural-role Business Logic
  * @description
  * Implements the "Scent-Sensitive" flow analysis heuristic. Evaluates whether a 
  * specific identifier interacts meaningfully within a file or simply passes 
- * through, while tracking identifier renaming (aliasing).
+ * through, while tracking identifier renaming (aliasing). Now includes debug reasons.
  * 
  * @core-principles
  * 1. IS responsible for identifier-level lifecycle tracking.
@@ -13,7 +13,7 @@
  * 3. MUST update the "Scent" (identifier name) when aliasing is detected.
  * 
  * @api-declaration
- *   export interface FlowResult { isMeaningful: boolean; nextIdentifier: string; }
+ *   export interface FlowResult { isMeaningful: boolean; nextIdentifier: string; reason: string; }
  *   export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult;
  * 
  * @contract
@@ -30,6 +30,8 @@ export interface FlowResult {
   isMeaningful: boolean;
   /** The name of the identifier to track in downstream files */
   nextIdentifier: string;
+  /** Debug description of why the flow was classified as meaningful or passive */
+  reason: string;
 }
 
 /**
@@ -39,12 +41,13 @@ export interface FlowResult {
  * 
  * @param ast - The Babel File AST.
  * @param targetIdentifier - The current name of the identifier being tracked.
- * @returns A FlowResult indicating meaningfulness and the next scent name.
+ * @returns A FlowResult indicating meaningfulness, the next scent name, and the classification reason.
  */
 export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
   let interactionCount = 0;
   let nextIdentifier = targetIdentifier;
   let aliased = false;
+  const reasons: string[] = [];
 
   traverse(ast, {
     // 1. Detect Aliasing (Renaming)
@@ -60,6 +63,7 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
         if (path.parentPath.isObjectPattern()) {
           aliased = true;
           nextIdentifier = path.node.value.name;
+          reasons.push(`Destructuring Rename: ${targetIdentifier} -> ${nextIdentifier}`);
         }
       }
     },
@@ -73,6 +77,7 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
       ) {
         aliased = true;
         nextIdentifier = path.node.id.name;
+        reasons.push(`Variable Alias: ${targetIdentifier} -> ${nextIdentifier}`);
       }
     },
 
@@ -135,6 +140,7 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
       // Note: <Child user={user} /> was caught by Exclusion B above.
       if (path.parentPath.isJSXExpressionContainer()) {
         interactionCount++;
+        reasons.push('JSX Rendering');
         return;
       }
 
@@ -147,12 +153,14 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
         path.parentPath.isUnaryExpression()
       ) {
         interactionCount++;
+        reasons.push('Logic/Branching');
         return;
       }
 
       // C: Member Access: user.name
       if (path.parentPath.isMemberExpression() && path.parentPath.node.object === path.node) {
         interactionCount++;
+        reasons.push('Member Access');
         return;
       }
 
@@ -163,6 +171,7 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
            // Heuristic: hooks start with 'use'
            if (callExpr.node.callee.name.startsWith('use')) {
              interactionCount++;
+             reasons.push('Hook Dependency');
              return;
            }
         }
@@ -171,13 +180,20 @@ export function analyzeFlow(ast: Node, targetIdentifier: string): FlowResult {
       // E: Function Calls: doSomething(user)
       if (path.parentPath.isCallExpression() && path.listKey === 'arguments') {
         interactionCount++;
+        reasons.push('Function Argument');
         return;
       }
     }
   });
 
+  const isMeaningful = aliased || interactionCount > 0;
+  const reason = isMeaningful 
+    ? reasons.join(', ') 
+    : 'Passive/Passthrough';
+
   return {
-    isMeaningful: aliased || interactionCount > 0,
-    nextIdentifier
+    isMeaningful,
+    nextIdentifier,
+    reason
   };
 }
