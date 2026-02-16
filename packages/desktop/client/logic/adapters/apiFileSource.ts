@@ -1,20 +1,21 @@
 /**
  * @file packages/desktop/client/logic/adapters/apiFileSource.ts
- * @stamp {"ts":"2026-02-16T21:15:00Z"}
+ * @stamp {"ts":"2026-02-16T22:30:00Z"}
  * @architectural-role Data Adapter
  * @description
- * A concrete implementation of FileSource that communicates with the local 
- * Express API and establishes a WebSocket connection for real-time filesystem 
- * events. Includes resilient reconnection logic and proxied-environment support.
+ * A high-performance implementation of FileSource that utilizes the "Bulk Loading"
+ * pattern. It pre-hydrates a local memory cache with the entire repository's
+ * textual content on startup, eliminating network latency during heavy analysis
+ * phases (Graph Building, Pack Assembly).
  *
  * @core-principles
- * 1. IS the bridge between the Desktop UI and the Local Server.
- * 2. IMPLEMENTS the standard FileSource interface with push support.
- * 3. OWNS the WebSocket connection lifecycle and event bridging.
+ * 1. ZERO LATENCY: MUST serve file content from memory after the initial bulk load.
+ * 2. REAL-TIME SYNC: Updates the local cache immediately upon receiving watcher events.
+ * 3. TRANSPARENCY: Implements the standard FileSource interface while hiding the caching layer.
  *
  * @contract
  *   assertions:
- *     purity: mutates # Network I/O and stateful WebSocket.
+ *     purity: mutates # Manages internal memory cache.
  *     external_io: [http, ws]
  */
 
@@ -25,72 +26,71 @@ const API_BASE = '/api';
 /**
  * @id packages/desktop/client/logic/adapters/apiFileSource.ts#ApiFileSource
  * @description
- * Handles data retrieval via HTTP and real-time notifications via WebSocket.
+ * Concrete adapter for the Desktop environment with integrated bulk-caching.
  */
 export class ApiFileSource implements FileSource {
   private ws: WebSocket | null = null;
   private eventCallback: ((event: FileEvent) => void) | null = null;
+  
+  /** 
+   * Internal VFS (Virtual File System) to store pre-hydrated contents.
+   * Key: relativePath, Value: textContent
+   */
+  private contentCache = new Map<string, string>();
 
   constructor() {
     this.connectWebSocket();
   }
 
   /**
-   * Establishes the WebSocket connection to the server for push notifications.
-   * Detects protocol and host dynamically to handle local and proxied dev environments.
+   * Establishes the WebSocket connection for push notifications.
+   * On 'change' or 'add' events, it proactively re-fetches the specific file
+   * to keep the local memory cache in sync with the disk.
    */
   private connectWebSocket() {
-    const isSecure = window.location.protocol === 'https:';
-    const protocol = isSecure ? 'wss:' : 'ws:';
-    
-    // In dev mode with Vite, host includes the port (e.g. localhost:5173).
-    // In production, it's the port the app is serving on (e.g. localhost:3000).
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    
-    // Connect to the root of the current host. 
-    // The Vite proxy (dev) or the bundled server (prod) must handle the upgrade.
-    // Use a specific sub-path to avoid colliding with Vite/HMR
     const wsUrl = `${protocol}//${host}/api/watcher-ws`;
 
-    console.log(`[ApiFileSource] Initializing watcher connection to: ${wsUrl}`);
-    
     try {
       this.ws = new WebSocket(wsUrl);
 
-      this.ws.onopen = () => {
-        console.log(`[ApiFileSource] Watcher connection established.`);
-      };
-
-      this.ws.onmessage = (msg) => {
+      this.ws.onmessage = async (msg) => {
         try {
           const data = JSON.parse(msg.data) as FileEvent;
-          console.log(`[ApiFileSource] Watcher Event: ${data.type} -> ${data.path}`);
+          
+          // CRITICAL: Sync memory cache before notifying UI
+          if (data.type === 'unlink') {
+            this.contentCache.delete(data.path);
+          } else if (data.type === 'change' || data.type === 'add') {
+            // Re-hydrate only the specific file that changed
+            const freshContent = await this.fetchSingleFile(data.path);
+            this.contentCache.set(data.path, freshContent);
+          }
+
           if (this.eventCallback) {
             this.eventCallback(data);
           }
         } catch (e) {
-          console.error('[ApiFileSource] Failed to parse watcher message:', e);
+          console.error('[ApiFileSource] Failed to process watcher sync:', e);
         }
       };
 
-      this.ws.onclose = (event) => {
-        if (event.code !== 1000) {
-          console.warn(`[ApiFileSource] Connection lost (Code: ${event.code}). Retrying in 5s...`);
-          setTimeout(() => this.connectWebSocket(), 5000);
-        }
-      };
-
-      this.ws.onerror = (err) => {
-        // Detailed error logging for environment diagnostics
-        console.error('[ApiFileSource] WebSocket Error Detected:', {
-          url: wsUrl,
-          readyState: this.ws?.readyState,
-          error: err
-        });
+      this.ws.onclose = () => {
+        setTimeout(() => this.connectWebSocket(), 5000);
       };
     } catch (err) {
-      console.error('[ApiFileSource] Failed to instantiate WebSocket:', err);
+      console.error('[ApiFileSource] WebSocket initialization failed:', err);
     }
+  }
+
+  /**
+   * Internal helper to fetch content for a single file (used for real-time sync).
+   */
+  private async fetchSingleFile(path: string): Promise<string> {
+    const res = await fetch(`${API_BASE}/file/${path}`);
+    if (!res.ok) return '';
+    return res.text();
   }
 
   async getConfig(): Promise<SlicerConfig> {
@@ -105,32 +105,56 @@ export class ApiFileSource implements FileSource {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
     });
-    
     if (!res.ok) throw new Error('Failed to save config');
   }
 
+  /**
+   * Performs the Bulk Hydration. 
+   * Fetches every file's content in one request and populates the cache.
+   */
   async getFileList(): Promise<FileMetadata[]> {
-    const res = await fetch(`${API_BASE}/files`);
-    if (!res.ok) throw new Error('Failed to fetch file list');
-    return res.json() as Promise<FileMetadata[]>;
-  }
+    console.log('[ApiFileSource] Initializing Bulk Hydration...');
+    const res = await fetch(`${API_BASE}/bulk-files`);
+    if (!res.ok) throw new Error('Failed to fetch bulk file snapshot');
+    
+    const bulkData = await res.json() as Record<string, string>;
+    const metadata: FileMetadata[] = [];
 
-  async getFileContent(path: string): Promise<string> {
-    const res = await fetch(`${API_BASE}/file/${path}`);
-    if (!res.ok) throw new Error(`Failed to fetch file: ${path}`);
-    return res.text();
-  }
+    // Reset and populate cache
+    this.contentCache.clear();
+    
+    for (const [path, content] of Object.entries(bulkData)) {
+      this.contentCache.set(path, content);
+      metadata.push({
+        path,
+        // Approximate size in bytes using UTF-8 length
+        size: new TextEncoder().encode(content).length
+      });
+    }
 
-  async getFileBuffer(path: string): Promise<Uint8Array> {
-    const res = await fetch(`${API_BASE}/file/${path}`);
-    if (!res.ok) throw new Error(`Failed to fetch file buffer: ${path}`);
-    const buffer = await res.arrayBuffer();
-    return new Uint8Array(buffer);
+    console.log(`[ApiFileSource] Hydration complete. Cached ${metadata.length} files.`);
+    return metadata;
   }
 
   /**
-   * Registers a subscriber for filesystem events.
+   * INSTANT: Serves from local memory cache.
    */
+  async getFileContent(path: string): Promise<string> {
+    const cached = this.contentCache.get(path);
+    if (cached !== undefined) return cached;
+    
+    // Fallback: fetch single if not in cache (unlikely)
+    return this.fetchSingleFile(path);
+  }
+
+  /**
+   * INSTANT: Converts cached text to bytes.
+   */
+  async getFileBuffer(path: string): Promise<Uint8Array> {
+    const content = await this.getFileContent(path);
+    return new TextEncoder().encode(content);
+  }
+
   onWatcherEvent(callback: (event: FileEvent) => void): void {
     this.eventCallback = callback;
   }

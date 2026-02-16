@@ -1,6 +1,6 @@
 /**
  * @file packages/desktop/server/index.ts
- * @stamp {"ts":"2026-02-16T16:00:00Z"}
+ * @stamp {"ts":"2026-02-16T22:15:00Z"}
  * @architectural-role Feature Entry Point
  *
  * @description
@@ -19,7 +19,8 @@
  *   WS: / (WebSocket connection)
  *   GET /api/config
  *   POST /api/config
- *   GET /api/files
+ *   GET /api/files (Metadata only)
+ *   GET /api/bulk-files (Full Content Snapshot)
  *   GET /api/fs/browse
  *   GET /api/file/*
  *
@@ -41,10 +42,10 @@ import { isText } from 'istextorbinary';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import chokidar from 'chokidar';
-import type { FSWatcher } from 'chokidar'; // Fix: Explicit type import
+import type { FSWatcher } from 'chokidar';
 
 import { getRuntimeConfig, RUNTIME_CWD, CONFIG_PATH, PORT } from './config.js';
-import { scanRepository } from './service/scanner.js';
+import { scanRepository, readRepositoryContent } from './service/scanner.js';
 import { DEFAULT_CONFIG_YAML } from './defaultConfig.js';
 
 // --- CLI COMMAND ORCHESTRATION ---
@@ -81,15 +82,15 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/api/watcher-ws' });
 
 app.use(cors());
-app.use(express.json());
+// Increase payload limit for saving large configs if necessary, though mainly for JSON
+app.use(express.json({ limit: '50mb' }));
 
 // --- WATCHER STATE ---
-// Fix: Use the explicit FSWatcher type instead of the namespace
 let watcher: FSWatcher | null = null;
 
 function broadcast(type: 'change' | 'add' | 'unlink', relativePath: string) {
   const message = JSON.stringify({ type, path: relativePath });
-  wss.clients.forEach((client: WebSocket) => { // Fix: Explicitly type client
+  wss.clients.forEach((client: WebSocket) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(message);
     }
@@ -142,6 +143,9 @@ app.get('/api/config', (req, res) => {
   res.json(config.rawConfig);
 });
 
+/**
+ * Legacy metadata-only scan.
+ */
 app.get('/api/files', async (req, res) => {
   try {
     const config = getRuntimeConfig();
@@ -153,6 +157,31 @@ app.get('/api/files', async (req, res) => {
   } catch (e) {
     console.error('[API] Scan failed:', e);
     res.status(500).json({ error: 'Failed to scan repository' });
+  }
+});
+
+/**
+ * NEW: Bulk content retrieval.
+ * Returns { "path/to/file": "content..." } for all valid text files.
+ */
+app.get('/api/bulk-files', async (req, res) => {
+  try {
+    const config = getRuntimeConfig();
+    console.log('[API] Starting bulk file read...');
+    console.time('BulkRead');
+    
+    const result = await readRepositoryContent(config);
+    
+    console.timeEnd('BulkRead');
+    if (result.error) {
+      console.warn(`[API] Bulk read completed with warning: ${result.error}`);
+    }
+    
+    console.log(`[API] Serving ${Object.keys(result.files).length} files.`);
+    res.json(result.files);
+  } catch (e) {
+    console.error('[API] Bulk read failed:', e);
+    res.status(500).json({ error: 'Failed to read repository content' });
   }
 });
 
@@ -186,6 +215,7 @@ app.get('/api/fs/browse', async (req, res) => {
   }
 });
 
+// Single-file fetch (Fallback/Legacy support)
 app.get(/^\/api\/file\/(.+)$/, async (req, res) => {
   const relativePath = (req.params as any)[0];
   if (!relativePath) return res.status(400).send('Missing path');
