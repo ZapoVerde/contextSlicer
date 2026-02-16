@@ -1,13 +1,14 @@
 /**
  * @file packages/core/test/specs/02-hop-counting.spec.ts
- * @stamp {"ts":"2026-02-16T20:20:00Z"}
+ * @stamp {"ts":"2026-02-16T20:30:00Z"}
  * @architectural-role Test Suite
  * @test-target packages/core/src/logic/symbolGraph/augmentedTracer.ts
  *
  * @description
  * Structural integration test validating the distance calculation heuristics.
  * Verifies that the BFS traversal correctly utilizes the Two-Part Pipe Rule 
- * to bypass organizational barrels while maintaining physical path integrity.
+ * (lifted metadata) to bypass organizational barrels while maintaining 
+ * physical path integrity.
  * 
  * @criticality 2. Core Business Logic Orchestration.
  * @testing-layer Integration
@@ -22,21 +23,14 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { NetworkHarness } from '../harness/network-harness.js';
 import { traceLogicalPath } from '../../src/logic/symbolGraph/augmentedTracer.js';
 import { traceSymbolGraph } from '../../src/logic/symbolGraph/tracer.js';
-import { buildTemporaryAstCache } from '../../src/components/hooks/useQueryPanelState/astUtils.js';
 
 describe('Integration: Logical vs Physical Hop Counting', () => {
   let harness: NetworkHarness;
-  let astCache: Map<string, any>;
 
   beforeAll(async () => {
     harness = await NetworkHarness.bootstrap();
-    
-    // Fix: Use the production utility to build the cache.
-    // This ensures we only parse valid script files (.ts, .tsx, etc.)
-    // and ignore static assets that would crash the parser (like .md, .json).
-    const fileIndex = harness.getFileIndex();
-    const allFiles = Array.from(fileIndex.keys());
-    astCache = await buildTemporaryAstCache(fileIndex, allFiles);
+    // Logic Removal: astCache is no longer required for tracing as metadata 
+    // is front-loaded into the SymbolGraph nodes by the background workers.
   });
 
   it('should verify the "Wormhole" effect: 5 Physical junctions vs 1 Logical hop', () => {
@@ -46,14 +40,12 @@ describe('Integration: Logical vs Physical Hop Counting', () => {
 
     // 1. Physical Trace (Traditional BFS)
     // Chain: App -> ComplexBarrel -> components/index -> buttons/index -> core/index -> Button.tsx
-    // The traditional tracer counts every file junction as 1 hop.
     const physicalResults = traceSymbolGraph(graph, seed, 'dependencies', 5);
     expect(physicalResults).toContain(target);
 
     // 2. Logical Trace (Smart Trace)
-    // The intermediate files (ComplexBarrel, components/index, etc.) are all Pure Pipes.
-    // Pipe Rule: Cost 0. Button.tsx = Logic (Cost 1).
-    const logicalResults = traceLogicalPath(graph, astCache, seed, {
+    // SIGNATURE FIX: Removed astCache argument.
+    const logicalResults = traceLogicalPath(graph, seed, {
       mode: 'logical',
       direction: 'dependencies',
       maxHops: 1, 
@@ -73,9 +65,8 @@ describe('Integration: Logical vs Physical Hop Counting', () => {
     const seed = 'packages/web/App.tsx';
     const target = 'packages/web/userService.ts';
 
-    // App.tsx imports userService.ts directly.
-    // userService.ts is Logic (Cost 1).
-    const results = traceLogicalPath(graph, astCache, seed, {
+    // SIGNATURE FIX: Removed astCache argument.
+    const results = traceLogicalPath(graph, seed, {
       mode: 'logical',
       direction: 'dependencies',
       maxHops: 1,
@@ -93,7 +84,8 @@ describe('Integration: Logical vs Physical Hop Counting', () => {
     // userService <-> validator (Circular)
     const seed = 'packages/web/userService.ts';
     
-    const results = traceLogicalPath(graph, astCache, seed, {
+    // SIGNATURE FIX: Removed astCache argument.
+    const results = traceLogicalPath(graph, seed, {
       mode: 'logical',
       direction: 'both',
       maxHops: 5,
@@ -113,7 +105,8 @@ describe('Integration: Logical vs Physical Hop Counting', () => {
     const seed = 'packages/web/App.tsx';
     // Chain: App -> ScentChainA (1) -> ScentChainB (2) -> ScentChainC (3)
     
-    const results = traceLogicalPath(graph, astCache, seed, {
+    // SIGNATURE FIX: Removed astCache argument.
+    const results = traceLogicalPath(graph, seed, {
       mode: 'logical',
       direction: 'dependencies',
       maxHops: 2,

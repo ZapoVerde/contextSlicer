@@ -1,16 +1,16 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
- * @stamp {"ts":"2026-02-16T14:35:00Z"}
+ * @stamp {"ts":"2026-02-16T15:10:00Z"}
  * @architectural-role Business Logic
  * @description
  * A pure service that calculates the final set of file paths for a context pack.
- * Optimized with a shared LogBuffer to aggregate discovery telemetry from 
- * documentation folders, wildcards, and dependency traces into a single flush.
+ * Optimized for speed by utilizing pre-computed structural metadata in the 
+ * SymbolGraph, completely bypassing main-thread AST parsing.
  *
  * @core-principles
- * 1. IS a framework-agnostic logic engine for file discovery.
- * 2. MUST reconcile conflicting resolution instructions (Full > Summary).
- * 3. OPTIMIZES diagnostic observability via batch-buffered logging.
+ * 1. PERFORMANCE: MUST achieve near-instant execution by avoiding I/O and parsing.
+ * 2. RECONCILIATION: ENFORCES the "Full > Summary" resolution priority.
+ * 3. OBSERVABILITY: Uses buffered logging to provide diagnostic transparency.
  *
  * @api-declaration
  *   export async function discoverContextPaths(
@@ -31,14 +31,13 @@ import { traceSymbolGraph } from '../../../logic/symbolGraph';
 import { wildcardToRegExp } from '../../../logic/wildcardUtils';
 import { getFilesForCheckedFolders } from '../../../logic/docsFolderLogic';
 import { traceLogicalPath } from '../../../logic/symbolGraph/augmentedTracer';
-import { buildTemporaryAstCache } from './astUtils';
 import { LogBuffer } from '../../../logic/symbolGraph/logUtils';
 import type { QueryPanelState } from './types';
 
 /**
  * @id packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts#discoverContextPaths
  * @description
- * Executes the full discovery pipeline with consolidated batch logging.
+ * Executes the file discovery pipeline. Optimized to use embedded graph metadata.
  */
 export async function discoverContextPaths(
   fileIndex: Map<string, FileEntry>,
@@ -50,8 +49,8 @@ export async function discoverContextPaths(
   let traceWarning = '';
 
   /**
-   * identityMap: Tracks all requested resolutions for a physical path.
-   * Key: "src/file.ts" (Raw Physical Path)
+   * identityMap: Tracks requested resolutions for physical paths.
+   * Key: "src/file.ts" (Physical Path)
    */
   const identityMap = new Map<string, Set<ResolutionLevel>>();
 
@@ -67,7 +66,6 @@ export async function discoverContextPaths(
   // 1. Gather Seeds: Docs Folders
   const docFiles = getFilesForCheckedFolders(fileIndex, state.checkedDocsFolders);
   if (docFiles.length > 0) {
-    logger.push(`[Seeds] Added ${docFiles.length} files from docs folders.`);
     docFiles.forEach(path => {
       addRequest(path, 'full');
       seedPaths.add(path);
@@ -80,7 +78,6 @@ export async function discoverContextPaths(
     for (const pattern of patterns) {
       const regex = wildcardToRegExp(pattern);
       const matches = allFilePaths.filter(p => regex.test(p));
-      logger.push(`[Seeds] Wildcard '${pattern}' matched ${matches.length} files.`);
       matches.forEach(m => {
         addRequest(m, 'full');
         seedPaths.add(m);
@@ -88,27 +85,23 @@ export async function discoverContextPaths(
     }
   }
 
-  // 3. Gather Seeds: Trace Start
+  // 3. Gather Seeds: Trace Entry
   if (state.traceQuery) {
     const startPath = state.traceQuery.split('#')[0];
-    logger.push(`[Seeds] Trace entry point: ${startPath}`);
     addRequest(startPath, 'full');
     seedPaths.add(startPath);
   }
 
-  // 4. Perform Dependency Trace
+  // 4. Perform Dependency Trace (O(1) Flag Lookup)
   const totalHops = Math.max(state.traceDepth, state.summaryTraceDepth);
   
   if (totalHops > 0 && seedPaths.size > 0) {
     if (symbolGraph) {
       if (state.traceMode === 'logical') {
-        const graphFiles = Array.from(symbolGraph.values()).map(n => n.filePath);
-        const astCache = await buildTemporaryAstCache(fileIndex, graphFiles);
-
-        logger.push(`[Trace] Starting logical trace for ${seedPaths.size} seeds...`);
+        // PERFORMANCE FIX: traceLogicalPath no longer requires astCache.
+        // It relies on SymbolNode.hasLogicActivity / hasReexports.
         for (const startPath of Array.from(seedPaths)) {
-          // Pass the shared logger to augmentedTracer to aggregate logs
-          const tracedNodes = traceLogicalPath(symbolGraph, astCache, startPath, {
+          const tracedNodes = traceLogicalPath(symbolGraph, startPath, {
             mode: 'logical',
             direction: state.traceDirection,
             maxHops: state.traceDepth,
@@ -120,7 +113,7 @@ export async function discoverContextPaths(
           });
         }
       } else {
-        logger.push(`[Trace] Starting physical fallback trace...`);
+        // Physical fallback
         for (const startPath of Array.from(seedPaths)) {
           const tracedPaths = traceSymbolGraph(symbolGraph, startPath, state.traceDirection, state.traceDepth);
           tracedPaths.forEach(p => addRequest(p, 'full'));
@@ -128,17 +121,17 @@ export async function discoverContextPaths(
       }
     } else {
       traceWarning = ' (Tracing skipped: Graph unavailable)';
-      logger.push('[Warning] Symbol graph unavailable. Tracing skipped.');
+      logger.push('[Warning] Symbol graph unavailable. Trace skipped.');
     }
   }
 
-  // 5. Reconciliation & Warning Generation
-  const resolutionWarnings: string[] = [];
+  // 5. Reconciliation (Full beats Summary)
+  const reconciliationWarnings: string[] = [];
   const finalInstructions: string[] = [];
 
   identityMap.forEach((resolutions, rawPath) => {
     if (resolutions.has('full') && resolutions.has('summary')) {
-      resolutionWarnings.push(
+      reconciliationWarnings.push(
         `Conflict: '${rawPath}' targeted as both Full and Summary. Defaulting to Full.`
       );
     }
@@ -158,20 +151,16 @@ export async function discoverContextPaths(
     
     filteredInstructions = finalInstructions.filter(instruction => {
       const rawPath = instruction.split(':')[0];
-      const isExcluded = exclusionRegexes.some(regex => regex.test(rawPath));
-      if (isExcluded) {
-        logger.push(`[Sieve] Excluded: ${rawPath}`);
-      }
-      return !isExcluded;
+      return !exclusionRegexes.some(regex => regex.test(rawPath));
     });
   }
 
-  logger.push(`Discovery complete. Instructions generated for ${filteredInstructions.length} files.`);
+  logger.push(`Discovery complete. Instructions: ${filteredInstructions.length}`);
   logger.flush();
 
   return {
     paths: filteredInstructions,
     traceWarning,
-    resolutionWarnings
+    resolutionWarnings: reconciliationWarnings
   };
 }

@@ -1,56 +1,54 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/usePackStats.ts
- * @stamp {"ts":"2026-02-16T13:50:00Z"}
+ * @stamp {"ts":"2026-02-16T16:15:00Z"}
  * @architectural-role Custom Hook / Logic
  * @description
- * Calculates real-time statistics for the current selection of targeted paths.
- * Implements "Progressive Accuracy":
- * 1. Synchronous: Provides a Code-calibrated heuristic (1.6x) for instant feedback.
- * 2. Asynchronous: Performs actual Tiktoken BPE analysis in the background once 
- *    file contents are fetched.
+ * Manages the presentation logic for context pack statistics. Implements a 
+ * "Fallback to Accuracy" pattern:
+ * 1. Immediate: Heuristic (1.6x multiplier) for instant UI feedback.
+ * 2. Deferred: Actual Tiktoken BPE count retrieved from the global store 
+ *    once the background assembly worker finishes.
  * 
  * @core-principles
- * 1. OWNS the logic for context pack size estimation.
- * 2. ENFORCES accuracy by transitioning from heuristic to actual BPE counting.
- * 3. MUST NOT block the UI thread during heavy tokenization.
+ * 1. OWNS the mapping of raw bytes and worker results to UI-friendly strings.
+ * 2. MUST use granular selectors to prevent unnecessary re-renders of the stats line.
+ * 3. ENFORCES visual distinction between estimated and accurate states.
  * 
  * @contract
  *   assertions:
- *     purity: mutates # Managed via useEffect/useState.
- *     state_ownership: [selectedCount, selectedBytes, accurateCount, isCalculating]
+ *     purity: mutates # Consumes external store state.
+ *     state_ownership: [localHeuristicStats]
  *     external_io: none
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import type { FileEntry } from '../../../state/slicer-state';
-import { countTokens } from '../../../logic/tokenCounter';
-import type { TargetedPath } from './types';
+import { useSlicerStore } from '../../../state/useSlicerStore.js';
+import type { FileEntry } from '../../../state/slicer-state.js';
+import type { TargetedPath } from './types.js';
 
 const CODE_SAFETY_FACTOR = 1.6;
 
 /**
  * @id packages/core/src/components/hooks/useTargetedPackManager/usePackStats.ts#usePackStats
  * @description
- * Orchestrates the dual-layer token counting logic.
+ * Aggregates local heuristic data and global background worker data into 
+ * a single reactive statistics object.
  */
 export function usePackStats(
   fileIndex: Map<string, FileEntry> | null,
   parsedTargets: TargetedPath[]
 ) {
-  // Layer 1: Heuristic State (Fast)
-  const [selectedCount, setSelectedCount] = useState<number>(0);
-  const [selectedBytes, setSelectedBytes] = useState<number>(0);
+  // 1. Local state for the "Fast" heuristic layer
+  const [heuristicStats, setHeuristicStats] = useState({ count: 0, bytes: 0 });
 
-  // Layer 2: Accuracy State (Slow/Async)
-  const [accurateCount, setAccurateCount] = useState<number | null>(null);
-  const [isCalculating, setIsCalculating] = useState<boolean>(false);
+  // 2. Granular selectors for the "Accurate" worker layer
+  const accurateTokenCount = useSlicerStore(s => s.accurateTokenCount);
+  const isAssembling = useSlicerStore(s => s.isAssembling);
 
-  // --- LAYER 1: HEURISTIC (Synchronous) ---
+  // --- LAYER 1: HEURISTIC (Synchronous Metadata Calculation) ---
   useEffect(() => {
     if (!fileIndex || parsedTargets.length === 0) {
-      setSelectedCount(0);
-      setSelectedBytes(0);
-      setAccurateCount(null);
+      setHeuristicStats({ count: 0, bytes: 0 });
       return;
     }
 
@@ -61,7 +59,8 @@ export function usePackStats(
       const entry = fileIndex.get(target.path);
       if (entry) {
         count++;
-        // Rough byte estimation including summary reduction
+        // Size Heuristic: Summaries consist of high-density docblocks/types.
+        // We estimate them at 15% of original or 600 bytes.
         if (target.resolution === 'summary') {
           bytes += Math.min(entry.size * 0.15, 600);
         } else {
@@ -70,78 +69,36 @@ export function usePackStats(
       }
     }
 
-    setSelectedCount(count);
-    setSelectedBytes(bytes);
-    // Reset accurate count whenever the selection changes to trigger recalculation
-    setAccurateCount(null);
-  }, [fileIndex, parsedTargets]);
-
-  // --- LAYER 2: TIKTOKEN (Asynchronous) ---
-  useEffect(() => {
-    if (!fileIndex || parsedTargets.length === 0) return;
-
-    let isAborted = false;
-    const timer = setTimeout(async () => {
-      setIsCalculating(true);
-      try {
-        // 1. Gather all contents (Parallel Async Load)
-        const fetchTasks = parsedTargets.map(async (t) => {
-          const entry = fileIndex.get(t.path);
-          if (!entry) return '';
-          const text = await entry.getText();
-          
-          // Mimic the actual output structure to get accurate counting
-          if (t.resolution === 'summary') {
-             // Summaries are significantly shorter, we use a placeholder 
-             // length for the distilled brief
-             return `=== ${t.path} ===\n[SUMMARY]\n${text.substring(0, 500)}`;
-          }
-          return `=== ${t.path} ===\n${text}`;
-        });
-
-        const contents = await Promise.all(fetchTasks);
-        if (isAborted) return;
-
-        // 2. Run actual BPE Tokenizer
-        const totalAssembledText = contents.join('\n');
-        const count = countTokens(totalAssembledText);
-
-        if (!isAborted) {
-          setAccurateCount(count);
-        }
-      } catch (e) {
-        console.error('[usePackStats] Tiktoken calculation failed', e);
-      } finally {
-        if (!isAborted) setIsCalculating(false);
-      }
-    }, 500); // Debounce to prevent heavy tokenizing while typing
-
-    return () => {
-      isAborted = true;
-      clearTimeout(timer);
-    };
+    setHeuristicStats({ count, bytes });
   }, [fileIndex, parsedTargets]);
 
   /**
-   * Derived formatting for the UI.
-   * Prioritizes the accurateCount if available, falls back to heuristic.
+   * Orchestrates the string representation of the token count.
+   * Logic: Accurate Count (if ready) > Heuristic + Loading (if assembling) > Heuristic.
    */
   const approxTokens = useMemo(() => {
-    if (accurateCount !== null) {
-      return `${accurateCount.toLocaleString()}`;
+    // If the worker is done and we have an accurate count, use it.
+    // If isAssembling is true, the count is stale/outdated, so we ignore it.
+    if (accurateTokenCount !== null && !isAssembling) {
+      return accurateTokenCount.toLocaleString();
     }
     
-    // Fallback to safety-factored heuristic
-    const baseProseEstimate = selectedBytes / 4;
+    // Calculate the fast fallback
+    const baseProseEstimate = heuristicStats.bytes / 4;
     const calibratedEstimate = Math.round(baseProseEstimate * CODE_SAFETY_FACTOR);
-    
-    return `~${calibratedEstimate.toLocaleString()}${isCalculating ? '...' : ''}`;
-  }, [selectedBytes, accurateCount, isCalculating]);
+    const label = `~${calibratedEstimate.toLocaleString()}`;
+
+    // Add visual indicator if the background job is running
+    return isAssembling ? `${label}...` : label;
+  }, [heuristicStats.bytes, accurateTokenCount, isAssembling]);
 
   return {
-    selectedCount,
-    selectedBytes,
+    selectedCount: heuristicStats.count,
+    selectedBytes: heuristicStats.bytes,
     approxTokens,
-    isAccurate: accurateCount !== null
+    /** UI flag to indicate if we are showing the final truth or a guess */
+    isAccurate: accurateTokenCount !== null && !isAssembling,
+    /** Expose background status for optional spinner/loading logic */
+    isCalculating: isAssembling
   };
 }

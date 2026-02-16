@@ -1,38 +1,38 @@
 /**
  * @file packages/core/src/components/TargetedPackActions.tsx
- * @stamp {"ts":"2025-09-28T18:24:00Z"}
+ * @stamp {"ts":"2026-02-16T17:35:00Z"}
  * @architectural-role UI Component / Presentational (Dumb)
- *
  * @description
- * This is a stateless component responsible for rendering the action buttons
- * (e.g., "Copy", "Download") and option checkboxes for the Targeted Pack Generator.
- * It was created by refactoring `TargetedPackPanel` to isolate the UI controls
- * from the logic they trigger.
- *
- * @contract
- * State Ownership: This component is stateless and owns no data. It receives all
- * its state and callbacks from its parent.
- * Public API: Accepts props for the state of all controls (`canExport`,
- * `preambleOnly`, etc.) and callback handlers for all user interactions (`onCopy`,
- * `onPreambleOnlyChange`, etc.).
- * Core Invariants:
- *   - MUST correctly enable or disable buttons based on the `canExport` prop.
- *   - MUST accurately reflect the state of the checkboxes via their respective props.
- *   - MUST call the appropriate `on...` handler when a user interacts with a control.
+ * Renders the primary action controls for the context pack generator. Implements 
+ * visual lockout logic for Trigger 2 (Exporting) while background assembly is 
+ * in progress.
  *
  * @core-principles
- * 1. **Purely Presentational:** Contains no business logic or side effects.
- * 2. **Controlled Component:** All control states are strictly managed by the parent.
- * 3. **Clear Responsibility:** Its single responsibility is to provide the user
- *    interface for initiating export actions and configuring their options.
+ * 1. PURELY PRESENTATIONAL: MUST NOT contain business logic or side effects.
+ * 2. FEEDBACK ORIENTED: Provides clear visual status of background assembly.
+ * 3. CONTROLLED COMPONENT: States and handlers are strictly managed by the parent.
+ *
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     state_ownership: none
+ *     external_io: none
  */
+
 import React from 'react';
-import { Stack, Button, Box, FormControlLabel, Checkbox, Typography } from '@mui/material';
+import { Stack, Button, Box, FormControlLabel, Checkbox, Typography, CircularProgress } from '@mui/material';
 
 interface TargetedPackActionsProps {
+  /** True if the export actions are valid and background assembly is complete. */
   canExport: boolean;
+  /** True if the background worker is currently building the pack. */
+  isAssembling: boolean;
+  /** True if the assembly engine is restricted to the file tree. */
   preambleOnly: boolean;
+  /** True if the assembly engine is restricted to JSDoc/Preambles. */
   docblocksOnly: boolean;
+  
+  // Handlers
   onCopy: () => void;
   onDownloadTxt: () => void;
   onDownloadZip: () => void;
@@ -41,8 +41,14 @@ interface TargetedPackActionsProps {
   onDocblocksOnlyChange: (checked: boolean) => void;
 }
 
+/**
+ * @id packages/core/src/components/TargetedPackActions.tsx#TargetedPackActions
+ * @description
+ * Visual control suite for initiating context pack exports.
+ */
 export const TargetedPackActions: React.FC<TargetedPackActionsProps> = ({
   canExport,
+  isAssembling,
   preambleOnly,
   docblocksOnly,
   onCopy,
@@ -52,38 +58,54 @@ export const TargetedPackActions: React.FC<TargetedPackActionsProps> = ({
   onPreambleOnlyChange,
   onDocblocksOnlyChange,
 }) => {
+  // Lock out the primary export buttons during background assembly
+  const isPrimaryDisabled = !canExport || isAssembling;
+
   return (
     <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-      {!preambleOnly && (
+      {!preambleOnly ? (
         <>
-          <Button variant="contained" onClick={onCopy} disabled={!canExport}>
-            Copy to Clipboard
+          <Button 
+            variant="contained" 
+            onClick={onCopy} 
+            disabled={isPrimaryDisabled}
+            startIcon={isAssembling ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {isAssembling ? 'Assembling...' : 'Copy to Clipboard'}
           </Button>
-          <Button variant="outlined" onClick={onDownloadTxt} disabled={!canExport}>
+          <Button 
+            variant="outlined" 
+            onClick={onDownloadTxt} 
+            disabled={isPrimaryDisabled}
+          >
             Download Txt
           </Button>
-          <Button variant="outlined" onClick={onDownloadZip} disabled={!canExport}>
+          <Button 
+            variant="outlined" 
+            onClick={onDownloadZip} 
+            disabled={isPrimaryDisabled}
+          >
             Download Zip
           </Button>
         </>
-      )}
-      {preambleOnly && (
-        <Button variant="contained" onClick={onCopyTree} disabled={!canExport}>
-          Copy Tree Only
+      ) : (
+        <Button 
+          variant="contained" 
+          onClick={onCopyTree} 
+          disabled={isPrimaryDisabled}
+        >
+          {isAssembling ? 'Building Tree...' : 'Copy Tree Only'}
         </Button>
       )}
 
-      {/* --- START OF CHANGE: Align checkbox group to the left --- */}
-      <Box sx={{ ml: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+      <Box sx={styles.checkboxStack}>
         <FormControlLabel
           control={
             <Checkbox
               checked={preambleOnly}
               onChange={e => {
                 onPreambleOnlyChange(e.target.checked);
-                if (e.target.checked) {
-                  onDocblocksOnlyChange(false);
-                }
+                if (e.target.checked) onDocblocksOnlyChange(false);
               }}
               size="small"
             />
@@ -107,3 +129,15 @@ export const TargetedPackActions: React.FC<TargetedPackActionsProps> = ({
     </Stack>
   );
 };
+
+/**
+ * Visual abstraction of layout values.
+ */
+const styles = {
+  checkboxStack: {
+    ml: 'auto', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'flex-start' 
+  }
+} as const;

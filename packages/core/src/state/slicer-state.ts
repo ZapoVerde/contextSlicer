@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/state/slicer-state.ts
- * @stamp {"ts":"2026-02-16T17:45:00Z"}
+ * @stamp {"ts":"2026-02-16T15:45:00Z"}
  * @architectural-role Type Definition
  * @description Defines the canonical state shape for the Context Slicer application.
  * @contract
@@ -9,7 +9,7 @@
  *     external_io: none
  */
 
-import type { SymbolGraph } from '../logic/symbolGraph/types.js';
+import type { SymbolGraph, ResolutionLevel } from '../logic/symbolGraph/types.js';
 import type { WorkerPool } from '../logic/worker/WorkerPool.js';
 
 // Re-export SlicerConfig related types for use in FileSource
@@ -110,6 +110,11 @@ export interface SlicerState {
   sanitationReport: SanitationReport | null; // Mostly for Web/Zip mode
   resolutionErrors: string[];
 
+  // Optimistic Assembly State (NEW)
+  isAssembling: boolean;
+  assembledPackText: string | null;
+  accurateTokenCount: number | null;
+
   // User Input
   targetedPathsInput: string;
   
@@ -120,6 +125,15 @@ export interface SlicerState {
   /** Incremental background update for a single changed file */
   patchGraphNode: (path: string) => Promise<void>;
   
+  /**
+   * Triggers the background assembly of the context pack.
+   * Handles Summary generation, Boundary scanning, and Token counting.
+   */
+  orchestrateAssembly: (
+    targets: Array<{ path: string; resolution: ResolutionLevel }>,
+    options: { docblocksOnly: boolean; includeBoundaryLibrary: boolean }
+  ) => Promise<void>;
+
   setFileSource: (source: import('../types/fileSource.js').FileSource, sourceType: SourceType) => Promise<void>;
   
   /**
@@ -132,7 +146,13 @@ export interface SlicerState {
 
 export const initialState: Omit<
   SlicerState,
-  'setTargetedPathsInput' | 'ensureSymbolGraph' | 'patchGraphNode' | 'setFileSource' | 'updateConfig' | 'reset'
+  | 'setTargetedPathsInput' 
+  | 'ensureSymbolGraph' 
+  | 'patchGraphNode' 
+  | 'setFileSource' 
+  | 'updateConfig' 
+  | 'reset'
+  | 'orchestrateAssembly'
 > = {
   fileIndex: null,
   slicerConfig: null,
@@ -146,4 +166,9 @@ export const initialState: Omit<
   sanitationReport: null,
   resolutionErrors: [],
   targetedPathsInput: '',
+  
+  // Optimistic Assembly Defaults
+  isAssembling: false,
+  assembledPackText: null,
+  accurateTokenCount: null,
 };

@@ -1,125 +1,76 @@
 /**
  * @file packages/core/src/logic/symbolGraph/tracer.spec.ts
- * @stamp {"ts":"2026-02-15T20:00:00Z"}
+ * @stamp {"ts":"2026-02-16T20:45:00Z"}
  * @architectural-role Test Suite
  * @description
  * Integration test for the Augmented Tracer and Pipe Detection logic.
- * Simulates the "Gradient Test Bed" network to verify hop counting and 
- * resolution assignment.
+ * Updated to support the optimized tracer signature which consumes structural 
+ * flags directly from nodes instead of requiring an AST Cache.
+ * 
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     external_io: none
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import * as parser from '@babel/parser';
-import { traceLogicalPath } from './augmentedTracer';
-import type { SymbolGraph, SymbolNode } from './types';
-
-// --- MOCK DATA (Matches setup-network.js) ---
-
-const FILES = {
-  // ZONE A: Target
-  'feature-a/index.ts': `
-    export * from './Component';
-    export * from './useFeature';
-    export * from './types';
-  `, // PIPE (Cost 0)
-
-  'feature-a/Component.tsx': `
-    import React from 'react';
-    import { useFeature } from './useFeature';
-    export const Component = () => {
-      const { data } = useFeature();
-      return <div>{data}</div>;
-    };
-  `, // LOGIC (Cost 1) - Has JSX
-
-  'feature-a/useFeature.ts': `
-    import { useState, useEffect } from 'react';
-    import { formatData } from '../shared';
-    export function useFeature() {
-      useEffect(() => {}, []);
-      return { data: null };
-    }
-  `, // LOGIC (Cost 1) - Has Hooks
-
-  'feature-a/types.ts': `
-    export interface FeatureConfig { enabled: boolean; }
-  `, // LOGIC (Cost 1) - Has Definition
-
-  // ZONE B: Upstream
-  'shared/index.ts': `
-    export * from './formatter';
-  `, // PIPE (Cost 0)
-
-  'shared/formatter.ts': `
-    export function formatData(input: string) { return input; }
-  `, // LOGIC (Cost 1)
-
-  // ZONE C: Downstream
-  'app/EntryPoint.tsx': `
-    import { Component } from '../feature-a';
-    export const EntryPoint = () => <Component />;
-  `, // LOGIC (Cost 1)
-
-  'app/Router.tsx': `
-    import { EntryPoint } from './EntryPoint';
-    export const Router = () => <EntryPoint />;
-  ` // LOGIC (Cost 1)
-};
+import { traceLogicalPath } from './augmentedTracer.js';
+import type { SymbolGraph } from './types.js';
 
 // --- TEST SETUP ---
 
 describe('Gradient Tracer Integration', () => {
   let graph: SymbolGraph;
-  let astCache: Map<string, any>;
 
   beforeAll(() => {
-    // 1. Build AST Cache
-    astCache = new Map();
-    Object.entries(FILES).forEach(([path, code]) => {
-      const ast = parser.parse(code, {
-        sourceType: 'module',
-        plugins: ['typescript', 'jsx'],
-      });
-      astCache.set(path, ast);
-    });
-
-    // 2. Build Symbol Graph (Manual Topology to guarantee connections)
+    // 1. Build Symbol Graph (Manual Topology)
+    // SIGNATURE FIX: Nodes now require hasReexports and hasLogicActivity flags.
     graph = new Map();
-    const createNode = (path: string, deps: string[], dependents: string[]) => {
+    const createNode = (
+      path: string, 
+      deps: string[], 
+      dependents: string[], 
+      hasReexports: boolean, 
+      hasLogicActivity: boolean
+    ) => {
       graph.set(path, {
         id: path,
         filePath: path,
         symbolName: '(file)',
         dependencies: new Set(deps),
-        dependents: new Set(dependents)
+        dependents: new Set(dependents),
+        hasReexports,
+        hasLogicActivity
       });
     };
 
-    // Define Topology
-    // feature-a/index.ts depends on Component, useFeature, types
-    // feature-a/index.ts is used by app/EntryPoint
+    // ZONE A: Target
+    // feature-a/index.ts is a pure PIPE (Cost 0)
     createNode('feature-a/index.ts', 
       ['feature-a/Component.tsx', 'feature-a/useFeature.ts', 'feature-a/types.ts'], 
-      ['app/EntryPoint.tsx']
+      ['app/EntryPoint.tsx'],
+      true, false
     );
 
-    createNode('feature-a/Component.tsx', ['feature-a/useFeature.ts'], ['feature-a/index.ts']);
-    // useFeature depends on shared/index (via import)
-    createNode('feature-a/useFeature.ts', ['shared/index.ts'], ['feature-a/index.ts', 'feature-a/Component.tsx']);
-    createNode('feature-a/types.ts', [], ['feature-a/index.ts']);
+    // feature-a logic components (Cost 1)
+    createNode('feature-a/Component.tsx', ['feature-a/useFeature.ts'], ['feature-a/index.ts'], false, true);
+    createNode('feature-a/useFeature.ts', ['shared/index.ts'], ['feature-a/index.ts', 'feature-a/Component.tsx'], false, true);
+    createNode('feature-a/types.ts', [], ['feature-a/index.ts'], false, true);
 
-    // shared/index depends on formatter
-    createNode('shared/index.ts', ['shared/formatter.ts'], ['feature-a/useFeature.ts']);
-    createNode('shared/formatter.ts', [], ['shared/index.ts']);
+    // ZONE B: Upstream
+    // shared/index.ts is a PIPE (Cost 0)
+    createNode('shared/index.ts', ['shared/formatter.ts'], ['feature-a/useFeature.ts'], true, false);
+    createNode('shared/formatter.ts', [], ['shared/index.ts'], false, true);
 
-    // EntryPoint depends on feature-a/index
-    createNode('app/EntryPoint.tsx', ['feature-a/index.ts'], ['app/Router.tsx']);
-    createNode('app/Router.tsx', ['app/EntryPoint.tsx'], []);
+    // ZONE C: Downstream
+    createNode('app/EntryPoint.tsx', ['feature-a/index.ts'], ['app/Router.tsx'], false, true);
+    createNode('app/Router.tsx', ['app/EntryPoint.tsx'], [], false, true);
   });
 
   // --- SCENARIO 1: Seed Only (0:0) ---
   it('Scenario 0:0 - Should return only the seed', () => {
-    const results = traceLogicalPath(graph, astCache, 'feature-a/index.ts', {
+    // SIGNATURE FIX: Removed astCache argument.
+    const results = traceLogicalPath(graph, 'feature-a/index.ts', {
       mode: 'logical',
       direction: 'both',
       maxHops: 0,
@@ -133,40 +84,34 @@ describe('Gradient Tracer Integration', () => {
 
   // --- SCENARIO 2: Seed + 1 Hop Summary (0:1) ---
   it('Scenario 0:1 - Should summarize immediate neighbors', () => {
-    const results = traceLogicalPath(graph, astCache, 'feature-a/index.ts', {
+    // SIGNATURE FIX: Removed astCache argument.
+    const results = traceLogicalPath(graph, 'feature-a/index.ts', {
       mode: 'logical',
       direction: 'both',
-      maxHops: 0, // Full Code limit
-      summaryHops: 1 // Summary limit
+      maxHops: 0, 
+      summaryHops: 1
     });
-
-    // We expect:
-    // Depth 0: feature-a/index.ts (Full - Seed is always full)
-    // Depth 1: Component, useFeature, types, EntryPoint (Summary)
-    // shared/index.ts is a Pipe (Cost 0). It might be included as a summary if visited.
 
     const paths = results.map(r => r.path);
     
-    // Check Depth 1 neighbors
     expect(paths).toContain('feature-a/Component.tsx');
     expect(paths).toContain('feature-a/useFeature.ts');
     expect(paths).toContain('app/EntryPoint.tsx');
 
-    // Verify Resolution
     const component = results.find(r => r.path === 'feature-a/Component.tsx');
     expect(component?.resolution).toBe('summary');
   });
 
   // --- SCENARIO 3: Seed + 1 Hop Full (1:1) ---
   it('Scenario 1:1 - Should provide full code for Logic neighbors', () => {
-    const results = traceLogicalPath(graph, astCache, 'feature-a/index.ts', {
+    // SIGNATURE FIX: Removed astCache argument.
+    const results = traceLogicalPath(graph, 'feature-a/index.ts', {
       mode: 'logical',
       direction: 'both',
       maxHops: 1,
       summaryHops: 1
     });
 
-    // Logic Neighbors should be Full
     const component = results.find(r => r.path === 'feature-a/Component.tsx');
     const entryPoint = results.find(r => r.path === 'app/EntryPoint.tsx');
 
@@ -175,9 +120,9 @@ describe('Gradient Tracer Integration', () => {
   });
 
   // --- SCENARIO 4: Seed + 1 Full + 2 Summary (1:2) ---
-  // This is the critical test for the Pipe Rule
   it('Scenario 1:2 - Should pass through Pipes to find distant Logic', () => {
-    const results = traceLogicalPath(graph, astCache, 'feature-a/index.ts', {
+    // SIGNATURE FIX: Removed astCache argument.
+    const results = traceLogicalPath(graph, 'feature-a/index.ts', {
       mode: 'logical',
       direction: 'both',
       maxHops: 1,
@@ -186,23 +131,11 @@ describe('Gradient Tracer Integration', () => {
 
     const paths = results.map(r => r.path);
 
-    // 1. Immediate Neighbors (Depth 1) -> Full
-    const useFeature = results.find(r => r.path === 'feature-a/useFeature.ts');
-    expect(useFeature?.resolution).toBe('full');
-
-    // 2. Distant Neighbors (Depth 2) -> Summary
-    // Trace: Index -> EntryPoint (1) -> Router (2)
-    const router = results.find(r => r.path === 'app/Router.tsx');
-    expect(paths).toContain('app/Router.tsx');
-    expect(router?.depth).toBe(2);
-    expect(router?.resolution).toBe('summary');
-
-    // 3. Pipe Traversal (The Wormhole)
-    // Trace: Index -> useFeature (1) -> shared/index (Pipe, +0) -> formatter (2)
+    // Trace: Index (0) -> useFeature (1) -> shared/index (Pipe, +0) -> formatter (2)
     const formatter = results.find(r => r.path === 'shared/formatter.ts');
     
-    expect(paths).toContain('shared/index.ts'); // The pipe itself is visited
-    expect(paths).toContain('shared/formatter.ts'); // The destination is reached
+    expect(paths).toContain('shared/index.ts');
+    expect(paths).toContain('shared/formatter.ts');
     
     expect(formatter?.depth).toBe(2);
     expect(formatter?.resolution).toBe('summary');

@@ -1,15 +1,15 @@
 /**
  * @file packages/core/src/logic/symbolGraph/types.ts
- * @stamp {"ts":"2026-02-14T12:55:00Z"}
+ * @stamp {"ts":"2026-02-16T14:45:00Z"}
  * @architectural-role Type Definition
  * @description
  * Canonical data structures for the symbol dependency graph and the dual-resolution 
- * logical tracing engine. Extends basic graph nodes with metadata required for 
- * scent-sensitive path analysis, resolution boundaries, and passthrough detection.
+ * logical tracing engine. Optimized with structural metadata flags to support
+ * instant logical tracing without main-thread AST parsing.
  * 
  * @core-principles
  * 1. IS the single source of truth for graph-related data schemas.
- * 2. ENFORCES architectural consistency between the tracer and UI state.
+ * 2. ENFORCES architectural consistency between the background workers and the tracer.
  * 3. MUST remain platform-agnostic (browser/node safe).
  * 
  * @api-declaration
@@ -41,9 +41,6 @@ export type TraceMode = 'physical' | 'logical';
  * @id packages/core/src/logic/symbolGraph/types.ts#PassiveOutputMode
  * @description
  * Defines how files classified as "passive" or "pipes" are rendered in the final pack.
- * 'full': Include entire file content.
- * 'docblock': Include only the leading preamble/JSDoc block.
- * 'meta': Include only the file path as a metadata comment.
  */
 export type PassiveOutputMode = 'full' | 'docblock' | 'meta';
 
@@ -66,43 +63,37 @@ export type ResolutionLevel = 'full' | 'summary';
 /**
  * @id packages/core/src/logic/symbolGraph/types.ts#TraceOptions
  * @description
- * Configuration object for the logical tracing engine, defining extraction boundaries.
+ * Configuration object for the logical tracing engine.
  */
 export interface TraceOptions {
-  /** The hop-counting strategy (Physical vs Logical) */
   mode: TraceMode;
-  /** The direction to traverse in the graph */
   direction: TraceDirection;
-  /** Maximum number of logical junctions for Full Extraction extraction */
+  /** Maximum number of logical junctions for Full Extraction */
   maxHops: number;
   /** Maximum number of logical junctions for Summary extraction (the outer limit) */
   summaryHops: number;
-  /** The starting identifier name to follow (the "Scent") */
   initialScent?: string;
 }
 
 /**
  * @id packages/core/src/logic/symbolGraph/types.ts#TracedNode
  * @description
- * A file node resulting from a trace operation, enriched with logical and resolution metadata.
+ * A file node resulting from a trace operation, enriched with logical metadata.
  */
 export interface TracedNode {
-  /** Relative path to the file */
   path: string;
-  /** Classification of the file's role in the trace */
   status: 'meaningful' | 'passive';
-  /** How the file should be rendered in the final output pack */
   resolution: ResolutionLevel;
-  /** The specific identifier name being tracked when this file was reached */
   scent: string;
-  /** The depth at which this file was discovered */
   depth: number;
 }
 
 /**
  * @id packages/core/src/logic/symbolGraph/types.ts#SymbolNode
  * @description
- * Represents a single symbol (function, class, variable) or a file node in the code graph.
+ * Represents a single symbol or a file node in the code graph.
+ * Enriched with structural metadata from background workers to eliminate 
+ * main-thread AST parsing bottlenecks.
  */
 export interface SymbolNode {
   /** Unique identifier: 'path/to/file.ts#symbolName' or 'path/to/file.ts' */
@@ -115,6 +106,12 @@ export interface SymbolNode {
   dependencies: Set<string>;
   /** IDs of nodes that depend on this node */
   dependents: Set<string>;
+
+  // --- PERFORMANCE OPTIMIZATION FLAGS ---
+  /** Part 1 of Pipe Rule: Does the file move symbols from elsewhere? */
+  hasReexports: boolean;
+  /** Part 2 of Pipe Rule: Does the file contain UI logic, hooks, or state? */
+  hasLogicActivity: boolean;
 }
 
 /**

@@ -1,21 +1,21 @@
 /**
  * @file packages/core/src/state/slicer-graph-manager.ts
- * @stamp {"ts":"2026-02-16T13:40:00Z"}
+ * @stamp {"ts":"2026-02-16T15:55:00Z"}
  * @architectural-role State Management
  * @description
- * Manages the lifecycle and state of the architectural Symbol Graph. 
- * Orchestrates background analysis via the WorkerPool. Optimized to prevent 
- * redundant rebuilds and minimize main-thread blocking.
+ * Manages the lifecycle of the architectural Symbol Graph and orchestrates 
+ * off-thread Context Pack assembly. Optimized to support optimistic background 
+ * jobs with automatic cancellation for stale requests.
  *
  * @core-principles
- * 1. STATE INTEGRITY: ENFORCES atomic updates to the Graph to prevent partial states.
- * 2. PERFORMANCE: MUST delegate heavy AST parsing to the WorkerPool.
- * 3. EFFICIENCY: SKIPS rebuilds if the graph is already 'ready' or 'building'.
+ * 1. PERFORMANCE: MUST delegate heavy assembly and tokenization to background workers.
+ * 2. INTEGRITY: ENFORCES a "Last-Task-Wins" policy to prevent stale results.
+ * 3. EFFICIENCY: Gathers only necessary file text for the assembly payload.
  *
  * @contract
  *   assertions:
- *     purity: mutates # Updates the global store state.
- *     state_ownership: [symbolGraph, graphStatus, workerPool, resolutionErrors]
+ *     purity: mutates # Updates global store state.
+ *     state_ownership: [symbolGraph, accurateTokenCount, isAssembling, assembledPackText]
  *     external_io: none
  */
 
@@ -25,23 +25,32 @@ import { WorkerPool } from '../logic/worker/WorkerPool.js';
 import { buildSymbolGraph, type SymbolGraph } from '../logic/symbolGraph/index.js';
 
 /**
+ * Tracks the ID of the most recent assembly request to handle cancellation.
+ */
+let latestAssemblyRequestId: string | null = null;
+
+/**
  * @id packages/core/src/state/slicer-graph-manager.ts#GraphSlice
  * @description
- * Definitive interface for the Graph Management store slice.
+ * Definitive interface for the Graph Management and Background Assembly slice.
  */
 export interface GraphSlice {
-  /** The persistent worker pool used for parallel analysis */
   workerPool: WorkerPool | null;
-  /** The processed code dependency graph */
   symbolGraph: SymbolGraph | null;
-  /** The current health/readiness status of the graph */
   graphStatus: 'idle' | 'building' | 'ready' | 'error';
-  /** Non-fatal errors encountered during analysis */
   resolutionErrors: string[];
-  /** Triggers a full background build of the symbol graph */
+  
+  // Optimistic Results
+  isAssembling: boolean;
+  assembledPackText: string | null;
+  accurateTokenCount: number | null;
+
   ensureSymbolGraph: () => Promise<void>;
-  /** Surgically updates a single node in the graph when a file changes */
   patchGraphNode: (path: string) => Promise<void>;
+  orchestrateAssembly: (
+    targets: Array<{ path: string; resolution: 'full' | 'summary' }>,
+    options: { docblocksOnly: boolean; includeBoundaryLibrary: boolean }
+  ) => Promise<void>;
 }
 
 export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (set, get) => ({
@@ -49,17 +58,18 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
   symbolGraph: null,
   graphStatus: 'idle',
   resolutionErrors: [],
+  
+  // Initial Optimistic State
+  isAssembling: false,
+  assembledPackText: null,
+  accurateTokenCount: null,
 
   ensureSymbolGraph: async () => {
     const { graphStatus, fileIndex, symbolGraph } = get();
-    
-    // OPTIMIZATION: Return early if the graph is already built or in progress.
-    // This prevents redundant rebuilds during consecutive query generation requests.
     if (graphStatus === 'building' || (graphStatus === 'ready' && symbolGraph) || !fileIndex) {
       return;
     }
     
-    // 1. Initialize Worker Pool if needed
     let pool = get().workerPool;
     if (!pool) {
       pool = new WorkerPool();
@@ -71,84 +81,115 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
     
     try {
       const errors: string[] = [];
-      
-      // Pass the worker pool to the orchestrator for parallel execution
-      const graph = await buildSymbolGraph(
-        fileIndex, 
-        {}, // Alias map can be extracted from slicerConfig in future
-        errors,
-        pool
-      ); 
-      
-      set({ 
-        symbolGraph: graph, 
-        graphStatus: 'ready', 
-        resolutionErrors: errors 
-      });
+      const graph = await buildSymbolGraph(fileIndex, {}, errors, pool); 
+      set({ symbolGraph: graph, graphStatus: 'ready', resolutionErrors: errors });
     } catch (e: unknown) {
-      console.error('[SymbolGraph] Fatal build failure:', e);
       set({ 
         graphStatus: 'error',
-        resolutionErrors: ['FATAL: Graph generation failed. Check worker logs.'],
+        resolutionErrors: ['FATAL: Graph generation failed.'],
       });
     }
   },
 
   patchGraphNode: async (path: string) => {
     const { symbolGraph, workerPool, fileIndex, graphStatus } = get();
-
-    // Patching only occurs on ready graphs to maintain consistency
-    if (graphStatus !== 'ready' || !symbolGraph || !workerPool || !fileIndex) {
-      return;
-    }
+    if (graphStatus !== 'ready' || !symbolGraph || !workerPool || !fileIndex) return;
 
     const fileEntry = fileIndex.get(path);
     if (!fileEntry) return;
 
     try {
       const content = await fileEntry.getText();
-      
-      // 1. Analyze changed file in background
       const result = await workerPool.execute('ANALYZE_FILE', { path, content });
       
       if (result.payload) {
         const metadata = result.payload;
-        
-        // 2. Surgical immutable update
         const newGraph = new Map(symbolGraph);
-        
-        // Remove old symbols for this file path
         for (const [id, node] of newGraph.entries()) {
-          if (node.filePath === path) {
-            newGraph.delete(id);
-          }
+          if (node.filePath === path) newGraph.delete(id);
         }
-
-        // Add file node
         newGraph.set(path, {
           id: path,
           filePath: path,
           symbolName: '(file)',
-          dependencies: new Set(), // Note: Full re-linking logic omitted for brevity in patch
-          dependents: new Set()
+          dependencies: new Set(),
+          dependents: new Set(),
+          hasReexports: metadata.hasReexports,
+          hasLogicActivity: metadata.hasLogicActivity
         });
-
-        // Add symbols
-        metadata.symbols.forEach(name => {
-          const id = `${path}#${name}`;
-          newGraph.set(id, {
-            id,
-            filePath: path,
-            symbolName: name,
-            dependencies: new Set(),
-            dependents: new Set()
-          });
-        });
-
         set({ symbolGraph: newGraph });
       }
+    } catch (e) { /* ignore */ }
+  },
+
+  /**
+   * Orchestrates the optimistic background assembly job.
+   */
+  orchestrateAssembly: async (targets, options) => {
+    const { fileIndex, workerPool, symbolGraph } = get();
+    if (!fileIndex || !workerPool || targets.length === 0) {
+      set({ assembledPackText: null, accurateTokenCount: null, isAssembling: false });
+      return;
+    }
+
+    // 1. Generate Request correlation ID for the closure
+    const requestId = crypto.randomUUID();
+    latestAssemblyRequestId = requestId;
+
+    set({ isAssembling: true });
+
+    try {
+      // 2. Gather contents for targets and potential boundary leaks
+      // To perform a Layer 1.5 scan, we need the text of files imported by our targets.
+      const pathsToFetch = new Set(targets.map(t => t.path));
+      
+      if (options.includeBoundaryLibrary && symbolGraph) {
+        targets.forEach(t => {
+          const node = symbolGraph.get(t.path);
+          if (node) {
+            node.dependencies.forEach(depPath => {
+              if (!pathsToFetch.has(depPath)) pathsToFetch.add(depPath);
+            });
+          }
+        });
+      }
+
+      const fileContents: Record<string, string> = {};
+      const fetchTasks = Array.from(pathsToFetch).map(async (path) => {
+        const entry = fileIndex.get(path);
+        if (entry) {
+          fileContents[path] = await entry.getText();
+        }
+      });
+
+      await Promise.all(fetchTasks);
+
+      // 3. Check for Interruption (Trigger 2 Interrupt)
+      if (latestAssemblyRequestId !== requestId) return;
+
+      // 4. Dispatch to Worker
+      const result = await workerPool.execute('ASSEMBLE_PACK', {
+        assembly: {
+          targets,
+          files: fileContents,
+          options
+        }
+      });
+
+      // 5. Final check before updating state
+      if (latestAssemblyRequestId === requestId && result.assembly) {
+        set({
+          assembledPackText: result.assembly.fullText,
+          accurateTokenCount: result.assembly.tokenCount,
+          isAssembling: false
+        });
+      }
+
     } catch (e) {
-      // Silently fail on patch to avoid UI disruption; next full build will correct
+      console.error('[Assembly] Background orchestration failed:', e);
+      if (latestAssemblyRequestId === requestId) {
+        set({ isAssembling: false });
+      }
     }
   }
 });

@@ -1,22 +1,20 @@
 /**
  * @file packages/core/src/logic/symbolGraph/augmentedTracer.ts
- * @stamp {"ts":"2026-02-16T14:20:00Z"}
+ * @stamp {"ts":"2026-02-16T14:55:00Z"}
  * @architectural-role Business Logic
  * @description
  * The core logical tracing engine. Performs a BFS traversal of the symbol graph
- * using the Two-Part Pipe Detection Rule. Structural passthroughs (Pipes) cost 
- * 0 hops, while logic-bearing files cost 1 hop. Enforces a distance-based 
- * resolution gradient. Supports dependency injection for logging to enable batching.
+ * using the Two-Part Pipe Detection Rule. Optimized to read pre-computed metadata
+ * from graph nodes instead of parsing ASTs on the fly.
  * 
  * @core-principles
  * 1. ENFORCES the Two-Part Pipe Rule: cost 0 only if (Re-exports AND No Activity).
- * 2. PRIORITIZES distance-based resolution: nearby logic files must be Full Code.
- * 3. SUPPORTS log aggregation via optional external LogBuffer injection.
+ * 2. PERFORMANCE: Zero AST parsing during trace. Uses O(1) node property lookups.
+ * 3. PRIORITIZES distance-based resolution: nearby logic files must be Full Code.
  * 
  * @api-declaration
  *   export function traceLogicalPath(
  *     graph: SymbolGraph, 
- *     astCache: Map<string, Node>,
  *     startId: string, 
  *     options: TraceOptions,
  *     externalLogger?: LogBuffer
@@ -28,10 +26,7 @@
  *     external_io: none
  */
 
-import type { Node } from '@babel/types';
 import type { SymbolGraph, TraceOptions, TracedNode, SymbolNode, ResolutionLevel } from './types.js';
-import { hasReexports } from './analyzers/barrelDetector.js';
-import { hasLogicActivity } from './analyzers/flowAnalyzer.js';
 import { LogBuffer } from './logUtils.js';
 
 const PHYSICAL_LIMIT = 150; // Safety boundary for deep physical chains
@@ -46,12 +41,11 @@ interface QueueItem {
  * @id packages/core/src/logic/symbolGraph/augmentedTracer.ts#traceLogicalPath
  * @description
  * Traces the dependency graph using the structural Pipe Detection Rule.
- * accepts an optional `externalLogger` to allow batch-processing of multiple traces
- * without spamming the console with individual flushes.
+ * Uses metadata already embedded in the graph nodes for instant evaluation.
  */
 export function traceLogicalPath(
   graph: SymbolGraph,
-  astCache: Map<string, Node>,
+  // Removed: astCache (no longer needed)
   startId: string,
   options: TraceOptions,
   externalLogger?: LogBuffer
@@ -60,8 +54,8 @@ export function traceLogicalPath(
   const logger = externalLogger || new LogBuffer('Tracer');
   const isBatchMode = !!externalLogger;
 
-  logger.push(`Starting trace from: ${startId}`);
   if (!isBatchMode) {
+    logger.push(`Starting trace from: ${startId}`);
     logger.push(`Config: MaxHops=${options.maxHops}, SummaryHops=${options.summaryHops}, Direction=${options.direction}`);
   }
 
@@ -83,8 +77,10 @@ export function traceLogicalPath(
   }
 
   if (startNodes.size === 0) {
-    logger.push(`[Warning] No start nodes found for ID: ${startId}`);
-    if (!isBatchMode) logger.flush();
+    if (!isBatchMode) {
+        logger.push(`[Warning] No start nodes found for ID: ${startId}`);
+        logger.flush();
+    }
     return [];
   }
 
@@ -108,8 +104,6 @@ export function traceLogicalPath(
       scent: '',
       depth: 0
     });
-    // In batch mode, we skip logging every seed to reduce noise
-    if (!isBatchMode) logger.push(`[Seed] ${n.filePath}`);
   });
 
   let head = 0;
@@ -136,14 +130,11 @@ export function traceLogicalPath(
       }
 
       const neighborPath = neighborNode.filePath;
-      const ast = astCache.get(neighborPath);
 
       // 3. Apply the Two-Part Pipe Detection Rule
-      // A file is a Pipe ONLY if it (Has Re-exports) AND (Has NO Logic Activity)
-      const reexports = ast ? hasReexports(ast) : false;
-      const activity = ast ? hasLogicActivity(ast) : true; 
-      
-      const isPipe = reexports && !activity;
+      // CRITICAL OPTIMIZATION: We check flags directly on the node.
+      // Pipe = (Moves Symbols) AND (Does Nothing Else)
+      const isPipe = neighborNode.hasReexports && !neighborNode.hasLogicActivity;
       const isLogic = !isPipe;
       
       // Cost 0 for Pipes (Wormholes), Cost 1 for Logic (Functional Files)
@@ -197,8 +188,6 @@ export function traceLogicalPath(
     }
   }
 
-  // Only flush if we created the logger locally (Single Mode)
-  // In Batch Mode, the parent will flush
   if (!isBatchMode) {
     logger.push(`Trace complete. Found ${results.size} unique files.`);
     logger.flush();

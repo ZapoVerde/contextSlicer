@@ -1,29 +1,26 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/index.ts
- * @stamp {"ts":"2026-02-16T14:30:00Z"}
+ * @stamp {"ts":"2026-02-16T17:15:00Z"}
  * @architectural-role Feature Entry Point
  * @description
- * The primary orchestrator for the Targeted Pack Manager subsystem. It composes 
- * state management, statistics, and target parsing with high-performance 
- * parallel services for AST extraction and layered context assembly. 
- * Now supports accurate token reporting via the progressive accuracy stats hook.
+ * The primary orchestrator for the Targeted Pack Manager subsystem. Implements 
+ * the Optimistic Assembly pattern:
+ * 1. Monitors the path list (Trigger 1) to auto-trigger background assembly (Trigger 2).
+ * 2. Provides instantaneous handlers for final export by consuming pre-built state.
+ * 3. EXPOSES the isAssembling flag to drive visual lockout of DL/Copy buttons.
  * 
  * @core-principles
- * 1. IS the public entry point for the Targeted Pack management subsystem.
- * 2. ORCHESTRATES the flow between UI state and high-performance processing logic.
- * 3. ENFORCES clean separation of concerns by delegating to sub-hooks and services.
- * 
- * @api-declaration
- *   export function useTargetedPackManager(): TargetedPackHookResult;
+ * 1. IS the composition root for the Targeted Pack management subsystem.
+ * 2. ORCHESTRATES the automated transition from list population to background assembly.
+ * 3. ENFORCES the "Instant Action" rule for final exports.
  * 
  * @contract
  *   assertions:
- *     purity: mutates # Orchestrates state and I/O.
- *     state_ownership: [targetedPathsInput, preambleOnly, docblocksOnly]
- *     external_io: [clipboard, browser_download]
+ *     purity: mutates # Orchestrates background state transitions.
+ *     state_ownership: none # Delegates to sub-hooks and global store.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useSlicerStore } from '../../../state/useSlicerStore.js';
 import { useFreshnessStatus } from '../../../hooks/useFreshnessStatus.js';
 
@@ -32,9 +29,7 @@ import { useTargetParsing } from './useTargetParsing.js';
 import { usePackOptions } from './usePackOptions.js';
 import { usePackStats } from './usePackStats.js';
 
-// Logic & Services
-import { runPreFlight } from './preFlightService.js';
-import { assembleContextPack } from './packAssembler.js';
+// Logic & I/O
 import * as io from './ioHandlers.js';
 
 // Types
@@ -43,14 +38,18 @@ import type { TargetedPackHookResult } from './types.js';
 /**
  * @id packages/core/src/components/hooks/useTargetedPackManager/index.ts#useTargetedPackManager
  * @description
- * Provides a unified API for managing, previewing, and exporting targeted 
- * context packs with professional-grade token metrics.
+ * Provides a unified API for context pack lifecycle management.
  */
 export function useTargetedPackManager(): TargetedPackHookResult {
-  // 1. Central State (Zustand - Granular Selectors)
+  // 1. Central State Selectors (Granular)
   const fileIndex = useSlicerStore(s => s.fileIndex);
   const targetedPathsInput = useSlicerStore(s => s.targetedPathsInput);
   const setTargetedPathsInput = useSlicerStore(s => s.setTargetedPathsInput);
+  
+  // Optimistic Background State
+  const isAssembling = useSlicerStore(s => s.isAssembling);
+  const assembledPackText = useSlicerStore(s => s.assembledPackText);
+  const orchestrateAssembly = useSlicerStore(s => s.orchestrateAssembly);
   
   const { isStale } = useFreshnessStatus();
 
@@ -58,49 +57,47 @@ export function useTargetedPackManager(): TargetedPackHookResult {
   const { parsedTargets } = useTargetParsing(targetedPathsInput);
   const { preambleOnly, docblocksOnly, setPreambleOnly, setDocblocksOnly } = usePackOptions();
   
-  // STATS INTEGRATION: selectedCount, approxTokens (progressive), and isAccurate (Tiktoken flag)
+  // Stats consumes the accurateTokenCount from state internally
   const { selectedCount, approxTokens, isAccurate } = usePackStats(fileIndex, parsedTargets);
 
-  // 3. Extraction Orchestration
+  // 3. Trigger 2: Optimistic Background Assembly
   /**
-   * Internal helper to execute the multi-phase context assembly.
-   * Orchestrates the shift from raw inputs to a structured, layered pack.
+   * Effect: Monitors Trigger 1 (path list) and extraction options.
+   * Dispatches the ASSEMBLE_PACK task to the Worker Pool immediately.
    */
-  const getFormattedTextContent = useCallback(async (): Promise<string> => {
-    if (!fileIndex || parsedTargets.length === 0) return '';
+  useEffect(() => {
+    // If list is empty or source removed, reset is handled by the store
+    if (!fileIndex || parsedTargets.length === 0) return;
 
-    // Step 1: Parallel Load & Parse (Phase 1)
-    const preFlightData = await runPreFlight(parsedTargets, fileIndex);
+    orchestrateAssembly(parsedTargets, {
+      docblocksOnly,
+      // We always enable the boundary library for professional packs
+      includeBoundaryLibrary: true,
+    });
+  }, [fileIndex, parsedTargets, docblocksOnly, orchestrateAssembly]);
 
-    // Step 2: Assemble Layered Pack (Phase 2)
-    return assembleContextPack(
-      fileIndex, 
-      parsedTargets, 
-      preFlightData, 
-      {
-        docblocksOnly,
-        includeBoundaryLibrary: true,
-        // Default alias map for standard resolution
-        aliasMap: {
-          '@prism/shared-types': 'packages/shared-types',
-          '@prism/ui-kit': 'packages/ui-kit',
-          '@prism/web': 'packages/web'
-        }
-      }
-    );
-  }, [fileIndex, parsedTargets, docblocksOnly]);
+  // 4. Instantaneous Content Handlers
+  /**
+   * Helper that resolves the pre-assembled text from state.
+   * This is passed to I/O handlers to ensure they remain functional 
+   * without triggering new Babel parses on the main thread.
+   */
+  const getAssembledContent = useCallback(async (): Promise<string> => {
+    return assembledPackText || '';
+  }, [assembledPackText]);
 
-  // 4. Action Handlers (Wrapped I/O)
+  // 5. Action Handlers (Wrapped I/O)
   const handleDownloadTxt = useCallback(
-    () => io.handleDownloadTxt(getFormattedTextContent),
-    [getFormattedTextContent]
+    () => io.handleDownloadTxt(getAssembledContent),
+    [getAssembledContent]
   );
 
   const handleCopyToClipboard = useCallback(
-    () => io.handleCopyToClipboard(getFormattedTextContent),
-    [getFormattedTextContent]
+    () => io.handleCopyToClipboard(getAssembledContent),
+    [getAssembledContent]
   );
 
+  // Note: Zip download remains physical (gathering files), not text-based
   const handleDownloadZip = useCallback(
     () => io.handleDownloadZip(fileIndex, parsedTargets),
     [fileIndex, parsedTargets]
@@ -111,16 +108,21 @@ export function useTargetedPackManager(): TargetedPackHookResult {
     [parsedTargets]
   );
 
-  // 5. Final Composition
+  // 6. Logic: Export Readiness (The Lockout Flag)
+  // We can export if we have data AND the worker has finished (isAssembling is false).
+  const canExport = !!fileIndex && !isStale && parsedTargets.length > 0 && !isAssembling;
+
+  // 7. Final Composition
   return {
     // State
     isReady: !!fileIndex,
     isStale,
-    canExport: !!fileIndex && !isStale && parsedTargets.length > 0,
+    canExport,
     targetedPathsInput,
     selectedCount,
     approxTokens,
     isAccurate,
+    isAssembling,
     preambleOnly,
     docblocksOnly,
 
