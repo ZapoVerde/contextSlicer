@@ -22,24 +22,25 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { NetworkHarness } from '../harness/network-harness.js';
 import { traceLogicalPath } from '../../src/logic/symbolGraph/augmentedTracer.js';
 import { traceSymbolGraph } from '../../src/logic/symbolGraph/tracer.js';
+import { buildTemporaryAstCache } from '../../src/components/hooks/useQueryPanelState/astUtils.js';
 
 describe('Integration: Logical vs Physical Hop Counting', () => {
   let harness: NetworkHarness;
+  let astCache: Map<string, any>;
 
   beforeAll(async () => {
     harness = await NetworkHarness.bootstrap();
+    
+    // Fix: Use the production utility to build the cache.
+    // This ensures we only parse valid script files (.ts, .tsx, etc.)
+    // and ignore static assets that would crash the parser (like .md, .json).
+    const fileIndex = harness.getFileIndex();
+    const allFiles = Array.from(fileIndex.keys());
+    astCache = await buildTemporaryAstCache(fileIndex, allFiles);
   });
 
   it('should verify the "Wormhole" effect: 5 Physical junctions vs 1 Logical hop', () => {
     const graph = harness.getSymbolGraph();
-    const fileIndex = harness.getFileIndex();
-    
-    // We need an AST cache for the logical tracer
-    const astCache = new Map<string, any>();
-    for (const [path] of fileIndex) {
-      astCache.set(path, harness.getAst(path));
-    }
-
     const seed = 'packages/web/App.tsx';
     const target = 'packages/ui-kit/components/buttons/core/Button.tsx';
 
@@ -69,12 +70,6 @@ describe('Integration: Logical vs Physical Hop Counting', () => {
 
   it('should correctly identify a Logic Junction (Cost 1) despite being physically adjacent', () => {
     const graph = harness.getSymbolGraph();
-    const fileIndex = harness.getFileIndex();
-    const astCache = new Map<string, any>();
-    for (const [path] of fileIndex) {
-      astCache.set(path, harness.getAst(path));
-    }
-
     const seed = 'packages/web/App.tsx';
     const target = 'packages/web/userService.ts';
 
@@ -95,12 +90,6 @@ describe('Integration: Logical vs Physical Hop Counting', () => {
 
   it('should terminate circular dependencies (Möbius Loop) at the logical boundary', () => {
     const graph = harness.getSymbolGraph();
-    const fileIndex = harness.getFileIndex();
-    const astCache = new Map<string, any>();
-    for (const [path] of fileIndex) {
-      astCache.set(path, harness.getAst(path));
-    }
-
     // userService <-> validator (Circular)
     const seed = 'packages/web/userService.ts';
     
@@ -121,12 +110,6 @@ describe('Integration: Logical vs Physical Hop Counting', () => {
 
   it('should exclude distant logic chains that exceed the logical budget', () => {
     const graph = harness.getSymbolGraph();
-    const fileIndex = harness.getFileIndex();
-    const astCache = new Map<string, any>();
-    for (const [path] of fileIndex) {
-      astCache.set(path, harness.getAst(path));
-    }
-
     const seed = 'packages/web/App.tsx';
     // Chain: App -> ScentChainA (1) -> ScentChainB (2) -> ScentChainC (3)
     

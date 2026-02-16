@@ -1,16 +1,16 @@
 /**
  * @file packages/core/test/harness/network-harness.ts
- * @stamp {"ts":"2026-02-16T18:30:00Z"}
+ * @stamp {"ts":"2026-02-16T23:55:00Z"}
  * @architectural-role Utility / Test Infrastructure
  * @description
  * The authoritative test harness for the Hardened Prism Network. Bridges the 
  * gap between physical test fixtures and logical engines. Implements a 
  * MockWorkerPool to allow the multi-threaded build logic to execute within 
- * the Node.js test environment.
+ * the Node.js test environment. Updated with safe, extension-aware parsing.
  * 
  * @core-principles
  * 1. TESTABILITY: MUST provide a synchronous simulation of worker threads.
- * 2. ISOLATION: Ensures tests do not depend on browser-specific APIs (Web Workers).
+ * 2. ROBUSTNESS: MUST NOT attempt to parse non-code files as ASTs.
  * 3. CONSISTENCY: Uses the same analysis logic as the production worker.
  * 
  * @api-declaration
@@ -26,6 +26,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import traverse from '@babel/traverse';
 import { buildSymbolGraph } from '../../src/logic/symbolGraph/index.js';
 import { discoverSymbolsInAst } from '../../src/logic/symbolGraph/passes/2_discoverSymbols.js';
 import { parseSourceToAst } from '../../src/logic/symbolGraph/passes/1_buildAstCache.js';
@@ -36,7 +37,6 @@ import type { FileEntry } from '../../src/state/slicer-state.js';
 import type { WorkerPool } from '../../src/logic/worker/WorkerPool.js';
 import type { WorkerResult, TaskType } from '../../src/logic/worker/types.js';
 
-// Resolve __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -56,12 +56,32 @@ class MockWorkerPool {
   ): Promise<WorkerResult> {
     if (type === 'ANALYZE_FILE') {
       try {
+        // Fix: Extension check to ensure the worker only parses scripts
+        if (!/\.(ts|tsx|js|jsx)$/.test(payload.path)) {
+           return { taskId: 'mock-task' };
+        }
+
         const ast = parseSourceToAst(payload.content);
+        const imports: string[] = [];
+
+        traverse(ast, {
+          ImportDeclaration(p) {
+            imports.push(p.node.source.value);
+          },
+          ExportNamedDeclaration(p) {
+            if (p.node.source) imports.push(p.node.source.value);
+          },
+          ExportAllDeclaration(p) {
+            imports.push(p.node.source.value);
+          }
+        });
+
         return {
           taskId: 'mock-task',
           payload: {
             filePath: payload.path,
             symbols: discoverSymbolsInAst(ast),
+            imports: Array.from(new Set(imports)),
             hasReexports: hasReexports(ast),
             hasLogicActivity: hasLogicActivity(ast),
             isBarrel: isBarrelFile(ast),
@@ -90,13 +110,9 @@ export class NetworkHarness {
   private readonly networkPath: string;
 
   private constructor() {
-    // Resolve path to the testnetwork directory relative to this harness
     this.networkPath = path.resolve(__dirname, '../../testnetwork');
   }
 
-  /**
-   * Initializes the harness by scanning the physical network and building the graph.
-   */
   public static async bootstrap(): Promise<NetworkHarness> {
     const harness = new NetworkHarness();
     await harness.initializeFileIndex();
@@ -104,9 +120,6 @@ export class NetworkHarness {
     return harness;
   }
 
-  /**
-   * Recursively scans the testnetwork directory to populate the in-memory FileIndex.
-   */
   private async initializeFileIndex(): Promise<void> {
     const walk = (dir: string) => {
       const files = fs.readdirSync(dir);
@@ -136,10 +149,6 @@ export class NetworkHarness {
     walk(this.networkPath);
   }
 
-  /**
-   * Orchestrates the build of the Symbol Graph using the provided FileIndex.
-   * Injects monorepo aliases and the Mock Worker Pool.
-   */
   private async buildGraph(): Promise<void> {
     const errors: string[] = [];
     const aliasMap = {
@@ -148,9 +157,7 @@ export class NetworkHarness {
       '@prism/web': 'packages/web'
     };
 
-    // Cast MockWorkerPool to WorkerPool to satisfy the interface requirement
     const mockPool = new MockWorkerPool() as unknown as WorkerPool;
-
     this.symbolGraph = await buildSymbolGraph(this.fileIndex, aliasMap, errors, mockPool);
 
     if (errors.length > 0) {
@@ -170,12 +177,23 @@ export class NetworkHarness {
     return this.symbolGraph;
   }
 
+  /**
+   * Safe AST retrieval. Only parses supported script extensions.
+   */
   public getAst(filePath: string): any {
     const entry = this.fileIndex.get(filePath);
     if (!entry) return null;
     
-    // Synchronous read for testing convenience
+    // Safety check: Only parse if it's a code file
+    if (!/\.(ts|tsx|js|jsx)$/.test(filePath)) {
+      return null;
+    }
+
     const content = fs.readFileSync(path.join(this.networkPath, filePath), 'utf-8');
-    return parseSourceToAst(content);
+    try {
+      return parseSourceToAst(content);
+    } catch {
+      return null;
+    }
   }
 }

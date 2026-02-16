@@ -158,6 +158,7 @@ sanitation:
     # --- Project Specific Exclusions ---
     - "**/context-slicer-app/public/source-dump/**"
     - "!packages/context-slicer-app/public/source-dump/.gitkeep"
+
 # ===================================================================
 # SECTION 3: PRESETS
 #
@@ -166,81 +167,39 @@ sanitation:
 # a complex group of related files.
 # ===================================================================
 presets:
-  - # --- PRESET 1: Project Environment ---
-    id: "environment"
-    name: "Project Environment"
-    category: "Configuration Slice"
-    summary: "Selects all core configuration files for the project's environment and tooling."
-    rationale: "This preset is valuable because environment files are scattered across the repository, have different names (e.g., '.firebaserc', 'vite.config.ts'), and are hard to select manually. This preset captures the expert knowledge of which files are needed to understand the project's foundational setup."
+  - id: "config-files"
+    name: "Configuration"
+    category: "Setup"
+    summary: "All configuration files."
+    rationale: "Captures the project's build, linting, infrastructure, and dependency definitions to provide a complete operational context."
     useCases:
-      - "Quickly provide context about the project's setup and tooling."
-      - "Debugging build, environment, or dependency-related issues."
-    
-    # EDIT THIS LIST of wildcard patterns to match:
+      - "Understanding project setup and tooling."
+      - "Debugging build or environment issues."
     patterns:
-    # --- Root Level Configuration ---
-    - ".firebaserc"
-    - "firebase.json"         # CRITICAL: Was missing from the original list
-    - "pnpm-workspace.yaml"
-    - ".npmrc"
-    - "cors.json"
-    - "firestore.indexes.json"
-    - "eslint.config.js"      # CRITICAL: Be specific, don't use wildcards for the root config
-    - "package.json"        # Selects the root package.json
-    - "tsconfig.json"       # Selects the root tsconfig.json
-    - "vitest.config.ts"    # Selects the root vitest.config.ts
-    - "storage.rules"
-    - "firestore.rules"
-    - "AiAnvil.code-workspace"
-
-
-    # --- Nix Environment ---
-    - "flake.nix"
-    - "flake.lock"            # CRITICAL: The reproducibility contract was missing
-    - ".idx/dev.nix"
-
-    # --- IDE / Container ---
-    - ".devcontainer/devcontainer.json"
-    - "*.code-workspace"
-
-    # --- Tooling Config (in any package) ---
-    # This pattern explicitly starts from the 'packages/' directory,
-    # avoiding the ambiguity of the root-level globstar.
-    - "packages/**/package.json"
-    - "packages/**/tsconfig*.json"
-    - "packages/**/vite.config.*"
-    - "packages/**/vitest.config.*"
-
-    # --- Type Declarations (in any package) ---
-    - "**/vite-env.d.ts"
-    - "**/vitest.d.ts"
-
-    
-    # EDIT THIS LIST of file names/endings to explicitly remove from the results:
+      - "*.json"
+      - "README.md"
+      - "*.yaml"
+      - "*.js"
+      - "*.ts"
+      - ".idx/**"
+      - "**/*eslint*"
+      - "*eslint*"
+      - "tsconfig*"
+      - "**/tsconfig*"
+      - "vite*"
+      - "**/vite*"
+      - "package.json"
+      - "**/package.json"
+      - "firestore*"
+      - "firebase*"
+      - "Dockerfile"
+      - "docker-compose*"
+      - ".prettier*"
     exclusions:
-      - "pnpm-lock.yaml"
       - "package-lock.json"
+      - "pnpm-lock.yaml"
 
-  - # --- PRESET 2: Feature: ZIP Loading ---
-    id: "feature-zip-loading"
-    name: "Feature: ZIP Loading"
-    category: "Vertical Slice"
-    summary: "A vertical slice of all files related to the ZIP file loading and sanitation feature."
-    rationale: "This preset demonstrates a 'vertical slice' through the codebase. It gathers the UI component, the state management logic, the data types, and the relevant configuration for a single feature. This is powerful because it provides complete context for a feature in isolation."
-    useCases:
-      - "Refactoring the file upload and sanitation pipeline."
-      - "Debugging an issue with how ZIP files are processed."
-
-    # EDIT THIS LIST of exact file paths for this feature slice:
-    patterns:
-      - "**/src/features/context-slicer/state/zip-loader.ts"
-      - "**/src/features/context-slicer/state/zip-state.ts"
-      - "**/src/features/context-slicer/components/ZipLoader.tsx"
-      - "**/src/features/context-slicer/config/sanitation.config.ts"
-    
-    exclusions: []
-
-  - # --- PRESET 3: Logic: Symbol Graph ---
+  - # --- PRESET 2: Logic: Symbol Graph ---
     id: "logic-symbol-graph"
     name: "Logic: Symbol Graph"
     category: "Subsystem Slice"
@@ -299,7 +258,7 @@ liveDevelopment:
   # DESCRIPTION: The delay in milliseconds (ms) that the Node.js file
   # watcher waits after detecting a change before starting a new build.
   # This prevents rapid-fire rebuilds when saving multiple files.
-  watchDebounceMs: 5000
+  watchDebounceMs: 2000
 
   # DESCRIPTION: The delay in milliseconds (ms) that the web application
   # waits after detecting that its source is stale before automatically

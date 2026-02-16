@@ -1,12 +1,12 @@
 /**
  * @file packages/core/test/specs/03-resolution-priority.spec.ts
- * @stamp {"ts":"2026-02-16T19:15:00Z"}
+ * @stamp {"ts":"2026-02-16T23:05:00Z"}
  * @architectural-role Test Suite
  * @test-target packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
  * @description
  * Validates the resolution assignment logic and conflict reconciliation rules.
  * Uses an in-memory Micro-Repo to ensure tests are independent of physical 
- * file structures. Enforces "Highest Resolution Wins" (Full > Summary).
+ * file structures. Updated to support edge (import) extraction in mocks.
  *
  * @criticality 2. Core Business Logic Orchestration.
  * @testing-layer Unit
@@ -18,9 +18,11 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import traverse from '@babel/traverse';
 import { discoverContextPaths } from '../../src/components/hooks/useQueryPanelState/queryDiscoveryService.js';
 import { buildSymbolGraph } from '../../src/logic/symbolGraph/index.js';
 import { parseSourceToAst } from '../../src/logic/symbolGraph/passes/1_buildAstCache.js';
+import { discoverSymbolsInAst } from '../../src/logic/symbolGraph/passes/2_discoverSymbols.js';
 import type { QueryPanelState } from '../../src/components/hooks/useQueryPanelState/types.js';
 import type { FileEntry } from '../../src/state/slicer-state.js';
 import type { WorkerPool } from '../../src/logic/worker/WorkerPool.js';
@@ -51,14 +53,29 @@ async function setupMicroRepo() {
   // Mock WorkerPool for buildSymbolGraph orchestration
   const mockPool = {
     init: vi.fn(),
-    execute: vi.fn(async (type, payload) => {
+    execute: vi.fn(async (_type, payload) => {
       const ast = parseSourceToAst(payload.content);
-      // Minimal metadata for discovery
+      const imports: string[] = [];
+
+      // Fix: Extract imports in the mock to satisfy the linker
+      traverse(ast, {
+        ImportDeclaration(p) {
+          imports.push(p.node.source.value);
+        },
+        ExportNamedDeclaration(p) {
+          if (p.node.source) imports.push(p.node.source.value);
+        },
+        ExportAllDeclaration(p) {
+          imports.push(p.node.source.value);
+        }
+      });
+
       return {
         taskId: 'mock',
         payload: {
           filePath: payload.path,
-          symbols: ['default'], 
+          symbols: discoverSymbolsInAst(ast),
+          imports: Array.from(new Set(imports)), // Fix: Added imports
           hasReexports: false,
           hasLogicActivity: true,
           isBarrel: false
@@ -111,19 +128,17 @@ describe('Logic: Resolution Priority & Reconciliation', () => {
 
     const { paths, resolutionWarnings } = await discoverContextPaths(fileIndex, graph, state);
 
-    // Verify Resolution: "dependency.ts" should NOT have a :summary suffix.
+    // Verify Resolution
     expect(paths).toContain('dependency.ts');
     expect(paths).not.toContain('dependency.ts:summary');
 
-    // Verify Warning: User should be notified of the conflict resolution.
+    // Verify Warning
     expect(resolutionWarnings.some(w => w.includes('dependency.ts'))).toBe(true);
   });
 
   it('should assign :summary suffix when a file is only reached via Summary-zone trace', async () => {
     const { fileIndex, graph } = await setupMicroRepo();
 
-    // SCENARIO:
-    // seed.ts is the seed. Trace is set to 0 Full hops / 1 Summary hop.
     const state = createBaseState({
       traceQuery: 'seed.ts',
       traceDepth: 0,
@@ -132,16 +147,12 @@ describe('Logic: Resolution Priority & Reconciliation', () => {
 
     const { paths } = await discoverContextPaths(fileIndex, graph, state);
 
-    // dependency.ts is reached via trace but isn't a seed.
     expect(paths).toContain('dependency.ts:summary');
   });
 
   it('should ignore Summary traces if the file is already in the Full-zone trace', async () => {
     const { fileIndex, graph } = await setupMicroRepo();
 
-    // SCENARIO:
-    // traceDepth is 1. dependency.ts is reached at depth 1.
-    // Since 1 <= traceDepth, it is Full.
     const state = createBaseState({
       traceQuery: 'seed.ts',
       traceDepth: 1,
@@ -157,8 +168,6 @@ describe('Logic: Resolution Priority & Reconciliation', () => {
   it('should strictly exclude files regardless of resolution requested', async () => {
     const { fileIndex, graph } = await setupMicroRepo();
 
-    // SCENARIO:
-    // dependency.ts is a seed (Full) but is also matched by an exclusion pattern.
     const state = createBaseState({
       wildcardQuery: 'dependency.ts',
       exclusionWildcardQuery: 'dependency.ts'
