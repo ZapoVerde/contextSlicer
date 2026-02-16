@@ -1,12 +1,13 @@
 /**
  * @file packages/core/test/specs/03-resolution-priority.spec.ts
- * @stamp {"ts":"2026-02-16T23:05:00Z"}
+ * @stamp {"ts":"2026-02-16T23:35:00Z"}
  * @architectural-role Test Suite
  * @test-target packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
  * @description
  * Validates the resolution assignment logic and conflict reconciliation rules.
  * Uses an in-memory Micro-Repo to ensure tests are independent of physical 
- * file structures. Updated to support edge (import) extraction in mocks.
+ * file structures. Updated to satisfy the DistilledMetadata interface requiring 
+ * imports, semantic registries, and contract briefs.
  *
  * @criticality 2. Core Business Logic Orchestration.
  * @testing-layer Unit
@@ -54,10 +55,11 @@ async function setupMicroRepo() {
   const mockPool = {
     init: vi.fn(),
     execute: vi.fn(async (_type, payload) => {
+      if (!payload.content) return { taskId: 'mock' };
+      
       const ast = parseSourceToAst(payload.content);
       const imports: string[] = [];
 
-      // Fix: Extract imports in the mock to satisfy the linker
       traverse(ast, {
         ImportDeclaration(p) {
           imports.push(p.node.source.value);
@@ -75,16 +77,20 @@ async function setupMicroRepo() {
         payload: {
           filePath: payload.path,
           symbols: discoverSymbolsInAst(ast),
-          imports: Array.from(new Set(imports)), // Fix: Added imports
+          imports: Array.from(new Set(imports)),
           hasReexports: false,
           hasLogicActivity: true,
-          isBarrel: false
+          isBarrel: false,
+          // Satisfy updated DistilledMetadata interface
+          typeRegistry: {},
+          syntheticSignatures: {},
+          contractBrief: '\n--- STRUCTURAL CONTRACT ---\n'
         }
       };
     })
   } as unknown as WorkerPool;
 
-  const graph = await buildSymbolGraph(fileIndex, {}, [], mockPool);
+  const { graph } = await buildSymbolGraph(fileIndex, {}, [], mockPool);
   
   return { fileIndex, graph };
 }
@@ -116,23 +122,17 @@ describe('Logic: Resolution Priority & Reconciliation', () => {
   it('should prioritize Seed (Full) over Trace (Summary) for the same file', async () => {
     const { fileIndex, graph } = await setupMicroRepo();
 
-    // SCENARIO:
-    // 1. dependency.ts is requested as a Seed (Full) via wildcard.
-    // 2. dependency.ts is also reached via Trace from seed.ts (Summary).
     const state = createBaseState({
       wildcardQuery: 'dependency.ts',
       traceQuery: 'seed.ts',
-      traceDepth: 0,        // Trace reaches neighbors as Summary
-      summaryTraceDepth: 1  // One hop to dependency.ts
+      traceDepth: 0,
+      summaryTraceDepth: 1
     });
 
     const { paths, resolutionWarnings } = await discoverContextPaths(fileIndex, graph, state);
 
-    // Verify Resolution
     expect(paths).toContain('dependency.ts');
     expect(paths).not.toContain('dependency.ts:summary');
-
-    // Verify Warning
     expect(resolutionWarnings.some(w => w.includes('dependency.ts'))).toBe(true);
   });
 

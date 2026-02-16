@@ -1,21 +1,23 @@
 /**
  * @file packages/core/src/logic/symbolGraph/typeDefinitionExtractor.ts
- * @stamp {"ts":"2026-02-15T21:45:00Z"}
+ * @stamp {"ts":"2026-02-16T23:25:00Z"}
  * @architectural-role Business Logic / Extraction Engine
  * @description
- * Extracts raw source code for specific type definitions from files outside the 
- * context pack. It supports "Shallow Peeking" to retrieve the shape of symbols 
- * that cross the context boundary.
+ * Extracts semantically distilled signatures and type contracts for boundary symbols.
+ * Leverages the pre-computed Type and Signature libraries to avoid redundant 
+ * AST parsing during the assembly phase. Implements the "Local Chaser" logic
+ * to ensure that component signatures are accompanied by their property interfaces.
  * 
  * @core-principles
- * 1. IS responsible for retrieving the "Contract" of external dependencies.
- * 2. MUST prioritize token efficiency (extract only what is asked).
- * 3. DOES NOT perform deep recursive resolution (limits to 1 level or local refs).
+ * 1. IS responsible for retrieving the semantic contract of external dependencies.
+ * 2. PERFORMANCE: MUST achieve sub-millisecond execution via pre-computed lookups.
+ * 3. CONTRACT-FIRST: Prioritizes type definitions and synthetic signatures over logic.
  * 
  * @api-declaration
  *   export async function generateBoundaryLibrary(
- *     fileIndex: Map<string, FileEntry>,
- *     boundarySymbols: BoundarySymbol[]
+ *     boundarySymbols: BoundarySymbol[],
+ *     typeLibrary: Map<string, Record<string, string>>,
+ *     signatureLibrary: Map<string, Record<string, string>>
  *   ): Promise<string>;
  * 
  * @contract
@@ -24,24 +26,26 @@
  *     external_io: none
  */
 
-import * as parser from '@babel/parser';
-import traverse from '@babel/traverse';
-import type { FileEntry } from '../../state/slicer-state';
-import type { BoundarySymbol } from './boundaryScanner';
+import type { BoundarySymbol } from './boundaryScanner/index.js';
 
 /**
  * @id packages/core/src/logic/symbolGraph/typeDefinitionExtractor.ts#generateBoundaryLibrary
  * @description
- * Orchestrates the extraction of type definitions for all boundary symbols.
- * Groups by file and formats the output into a "Boundary Library" block.
+ * Orchestrates the extraction of semantically distilled content for all boundary symbols.
+ * Groups by file and pulls pre-computed definitions from the global registries.
+ * 
+ * @param boundarySymbols - The list of identified leaks crossing the context boundary.
+ * @param typeLibrary - Global registry of Type/Interface/Enum source code.
+ * @param signatureLibrary - Global registry of synthetic Value signatures.
  */
 export async function generateBoundaryLibrary(
-  fileIndex: Map<string, FileEntry>,
-  boundarySymbols: BoundarySymbol[]
+  boundarySymbols: BoundarySymbol[],
+  typeLibrary: Map<string, Record<string, string>>,
+  signatureLibrary: Map<string, Record<string, string>>
 ): Promise<string> {
   if (boundarySymbols.length === 0) return '';
 
-  // 1. Group symbols by source file to minimize parsing
+  // 1. Group symbols by source file
   const symbolsByFile = new Map<string, Set<string>>();
   for (const sym of boundarySymbols) {
     if (!symbolsByFile.has(sym.sourcePath)) {
@@ -52,22 +56,57 @@ export async function generateBoundaryLibrary(
 
   const libraryChunks: string[] = [];
 
-  // 2. Process each file
-  for (const [filePath, identifiers] of symbolsByFile.entries()) {
-    const fileEntry = fileIndex.get(filePath);
-    if (!fileEntry) continue;
+  // 2. Process each file using O(1) dictionary lookups
+  for (const [filePath, requestedIdentifiers] of symbolsByFile.entries()) {
+    const fileTypes = typeLibrary.get(filePath) || {};
+    const fileSignatures = signatureLibrary.get(filePath) || {};
+    
+    const extractedLines: string[] = [];
+    const addedIdentifiers = new Set<string>();
 
-    try {
-      const content = await fileEntry.getText();
-      const extractedCode = extractDefinitions(content, identifiers);
-      
-      if (extractedCode.length > 0) {
-        libraryChunks.push(
-          `--- ${filePath} ---\n${extractedCode.join('\n\n')}`
-        );
+    /**
+     * The "Local Chaser": Recursively finds types within a text string 
+     * that exist in this file's type library.
+     */
+    const chaseLocalTypes = (text: string) => {
+      // Find all potential identifiers (words) in the text
+      const words = text.match(/\b(\w+)\b/g);
+      if (!words) return;
+
+      for (const word of words) {
+        // If the word matches a locally defined type we haven't included yet
+        if (fileTypes[word] && !addedIdentifiers.has(word)) {
+          addedIdentifiers.add(word);
+          extractedLines.push(fileTypes[word]);
+          // Recurse to find types used within this type (Deep Local Chasing)
+          chaseLocalTypes(fileTypes[word]);
+        }
       }
-    } catch (e) {
-      console.warn(`[TypeExtractor] Failed to process ${filePath}`, e);
+    };
+
+    for (const id of requestedIdentifiers) {
+      if (addedIdentifiers.has(id)) continue;
+
+      // Priority 1: Synthetic Value Signatures (Components/Functions)
+      if (fileSignatures[id]) {
+        addedIdentifiers.add(id);
+        extractedLines.push(fileSignatures[id]);
+        // Trigger the Chaser to find local props/types mentioned in the signature
+        chaseLocalTypes(fileSignatures[id]);
+      } 
+      // Priority 2: Direct Type Definitions (Interfaces/Aliases)
+      else if (fileTypes[id]) {
+        addedIdentifiers.add(id);
+        extractedLines.push(fileTypes[id]);
+        // Recurse for nested type dependencies
+        chaseLocalTypes(fileTypes[id]);
+      }
+    }
+
+    if (extractedLines.length > 0) {
+      libraryChunks.push(
+        `--- ${filePath} ---\n${extractedLines.join('\n\n')}`
+      );
     }
   }
 
@@ -75,81 +114,11 @@ export async function generateBoundaryLibrary(
 
   return [
     '=== PROJECT BOUNDARY DEFINITIONS ===',
-    'The following symbols are imported by your selected files but reside outside the current context pack.',
+    'The following symbols are imported by your selected files but reside outside the context pack.',
+    'Implementations are distilled into synthetic signatures to preserve architectural context.',
     '',
     ...libraryChunks,
     '',
     '===================================='
   ].join('\n');
-}
-
-/**
- * Parses source code and extracts the AST nodes for specific named exports.
- * Handles Interfaces, TypeAliases, Classes, Enums, Namespaces, and Functions.
- */
-function extractDefinitions(source: string, identifiers: Set<string>): string[] {
-  const definitions: string[] = [];
-  const found = new Set<string>();
-
-  const ast = parser.parse(source, {
-    sourceType: 'module',
-    plugins: ['typescript', 'jsx'],
-    errorRecovery: true,
-  });
-
-  traverse(ast, {
-    // Handle: export interface User { ... }
-    // Handle: export type User = { ... }
-    // Handle: export class User { ... }
-    // Handle: export enum User { ... }
-    // Handle: export namespace API { ... }
-    ExportNamedDeclaration(path) {
-      const decl = path.node.declaration;
-      
-      if (!decl) return;
-
-      let name = '';
-      
-      // 1. Check Identifiers based on node type
-      if (
-        decl.type === 'TSInterfaceDeclaration' || 
-        decl.type === 'TSTypeAliasDeclaration' ||
-        decl.type === 'ClassDeclaration' ||
-        decl.type === 'TSEnumDeclaration' || 
-        decl.type === 'FunctionDeclaration' ||
-        decl.type === 'TSModuleDeclaration' // Covers TypeScript Namespaces
-      ) {
-        if (decl.id?.type === 'Identifier') {
-          name = decl.id.name;
-        }
-      } 
-      // 2. Handle Variable Declarations (export const User = ...)
-      else if (decl.type === 'VariableDeclaration') {
-        const declarator = decl.declarations[0];
-        if (declarator.id.type === 'Identifier') {
-          name = declarator.id.name;
-        }
-      }
-
-      // 3. Extract if matches requested symbol
-      if (name && identifiers.has(name) && !found.has(name)) {
-        if (path.node.start !== null && path.node.end !== null) {
-          definitions.push(source.slice(path.node.start, path.node.end));
-          found.add(name);
-        }
-      }
-    },
-
-    // Handle: export default class ... 
-    ExportDefaultDeclaration(path) {
-      if (identifiers.has('default') && !found.has('default')) {
-        if (path.node.start !== null && path.node.end !== null) {
-           definitions.push(source.slice(path.node.start, path.node.end));
-           found.add('default');
-        }
-      }
-    }
-  });
-
-  return definitions;
 }

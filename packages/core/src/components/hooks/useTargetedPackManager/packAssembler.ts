@@ -1,23 +1,26 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/packAssembler.ts
- * @stamp {"ts":"2026-02-16T06:35:00Z"}
+ * @stamp {"ts":"2026-02-16T20:45:00Z"}
  * @architectural-role Business Logic / Orchestrator
  * @description
- * Orchestrates the construction of the multi-layered context pack. It applies a 
- * resolution gradient: "Seed" files receive full implementation markers, 
- * while distant dependencies are distilled into semantic architectural briefs. 
- * Discovered external symbols are resolved via a Project Boundary Library.
+ * Orchestrates the construction of the multi-layered context pack string on the 
+ * main thread. Combines spatial mapping, boundary contract distillation, and 
+ * source logic. Leverages pre-computed semantic libraries to ensure high 
+ * performance and logic density in architectural extraction modes.
  * 
  * @core-principles
- * 1. ENFORCES mutual exclusivity: a file is either a Seed or a Summary, never both.
- * 2. MUST prioritize the "Signal-to-Noise" ratio by using minimal markers.
- * 3. OWNS the final composition and layering of the context document.
+ * 1. ENFORCES architectural layering: Spatial Map -> Boundary Library -> Source Logic.
+ * 2. PERFORMANCE: MUST avoid redundant AST parsing by consuming pre-computed registries.
+ * 3. SIGNAL-PRIORITY: Ensures structural dependencies (Imports/Exports) are visible in Docblock mode.
  * 
  * @api-declaration
  *   export async function assembleContextPack(
  *     fileIndex: Map<string, FileEntry>,
  *     targets: TargetedPath[],
  *     preFlightResults: Map<string, PreFlightResult>,
+ *     typeLibrary: Map<string, Record<string, string>>,
+ *     signatureLibrary: Map<string, Record<string, string>>,
+ *     contractLibrary: Map<string, string>,
  *     options: AssemblerOptions
  *   ): Promise<string>;
  * 
@@ -28,21 +31,22 @@
  */
 
 import * as parser from '@babel/parser';
-import { generateFileTree } from '../../../logic/fileTreeUtils';
+import { generateFileTree } from '../../../logic/fileTreeUtils.js';
 import { 
   generateSummary,
   scanBoundaries, 
   generateBoundaryLibrary 
-} from '../../../logic/symbolGraph';
-import type { FileEntry } from '../../../state/slicer-state';
+} from '../../../logic/symbolGraph/index.js';
+import { extractFilePreamble } from '../../../logic/preambleUtils.js';
+import type { FileEntry } from '../../../state/slicer-state.js';
 import type { 
   TargetedPath, 
   PreFlightResult 
-} from './types';
+} from './types.js';
 import type { File } from '@babel/types';
 
 interface AssemblerOptions {
-  /** If true, only extract the JSDoc/Preamble for files. */
+  /** If true, only extract the JSDoc/Preamble and Structural Contract for files. */
   docblocksOnly: boolean;
   /** If true, discovers and includes definitions for symbols that cross the pack boundary. */
   includeBoundaryLibrary: boolean;
@@ -53,14 +57,16 @@ interface AssemblerOptions {
 /**
  * @id packages/core/src/components/hooks/useTargetedPackManager/packAssembler.ts#assembleContextPack
  * @description
- * Builds the final context pack string. It iterates through targets to build 
- * Source Logic and performs a boundary scan on Seed files to generate the 
- * Layer 1.5 Boundary Library. Now utilizes the aliasMap for accurate monorepo resolution.
+ * Builds the final context pack string. Orchestrates Layer 1.5 and Layer 2 
+ * generation using global semantic registries for maximum efficiency.
  */
 export async function assembleContextPack(
   fileIndex: Map<string, FileEntry>,
   targets: TargetedPath[],
   preFlightResults: Map<string, PreFlightResult>,
+  typeLibrary: Map<string, Record<string, string>>,
+  signatureLibrary: Map<string, Record<string, string>>,
+  contractLibrary: Map<string, string>,
   options: AssemblerOptions
 ): Promise<string> {
   const pack: string[] = [];
@@ -83,25 +89,37 @@ export async function assembleContextPack(
     
     if (!fileEntry || !preFlight) continue;
 
+    pack.push(`=== ${target.path} ===`);
+
+    // STRATEGY A: Docblocks & Structural Contract (Architectural Mode)
+    if (options.docblocksOnly) {
+      pack.push('[PREAMBLE & CONTRACT]');
+      const preamble = extractFilePreamble(preFlight.content);
+      if (preamble) pack.push(preamble);
+
+      const brief = contractLibrary.get(target.path);
+      if (brief) pack.push(brief);
+
+      pack.push(`\n--- END OF FILE ---\n`);
+      continue;
+    }
+
+    // STRATEGY B: Resolution Gradient (Standard Mode)
     if (target.resolution === 'full') {
-      // PATTERN A: THE SEED (Full Implementation)
-      pack.push(`=== ${target.path} ===`);
+      // THE SEED (Full Implementation)
       pack.push(`[SEED - Full Implementation]`);
       pack.push('');
       pack.push(preFlight.content);
       pack.push(`\n--- END OF FILE ---\n`);
       
-      // Collect AST for Layer 1.5 Boundary Discovery
-      // We only scan boundaries for FULL implementation files to keep the 
-      // boundary library focused on the primary context.
       if (preFlight.ast) {
         selectedFilesForBoundaryScan.set(target.path, preFlight.ast);
       }
     } else {
-      // PATTERN B: THE DEPENDENCY (Summary Brief)
+      // THE DEPENDENCY (Summary Brief)
       let ast = preFlight.ast;
       
-      // Parse on the fly if pre-flight AST is missing (uncommon but possible)
+      // Parse fallback if AST missing
       if (!ast) {
         try {
           ast = parser.parse(preFlight.content, {
@@ -119,8 +137,6 @@ export async function assembleContextPack(
         pack.push(summary);
         pack.push('\n');
       } else {
-        // Fallback for files that completely fail parsing
-        pack.push(`=== ${target.path} ===`);
         pack.push(`[SUMMARY - Parse Failure]`);
         pack.push(`// Content omitted due to syntax errors.\n`);
       }
@@ -128,9 +144,7 @@ export async function assembleContextPack(
   }
 
   // --- LAYER 1.5: BOUNDARY LIBRARY ---
-  // We scan the symbols imported by our Seeds that are NOT in the selection.
   if (options.includeBoundaryLibrary && selectedFilesForBoundaryScan.size > 0) {
-    // RESOLUTION FIX: Pass the aliasMap to the scanner to support monorepo imports (@prism/*)
     const boundarySymbols = scanBoundaries(
       fileIndex,
       selectedFilesForBoundaryScan,
@@ -138,13 +152,14 @@ export async function assembleContextPack(
     );
 
     if (boundarySymbols.length > 0) {
+      // NEW: Pass semantic registries to generate distilled definitions
       const boundaryLibrary = await generateBoundaryLibrary(
-        fileIndex, 
-        boundarySymbols
+        boundarySymbols,
+        typeLibrary,
+        signatureLibrary
       );
       
       if (boundaryLibrary) {
-        // Inject Layer 1.5 BEFORE Layer 2
         const markerIndex = pack.indexOf(sourceLogicMarker);
         if (markerIndex !== -1) {
           pack.splice(markerIndex, 0, 

@@ -1,8 +1,17 @@
 /**
  * @file packages/core/src/state/slicer-state.ts
- * @stamp {"ts":"2026-02-16T15:45:00Z"}
+ * @stamp {"ts":"2026-02-16T22:35:00Z"}
  * @architectural-role Type Definition
- * @description Defines the canonical state shape for the Context Slicer application.
+ * @description 
+ * Defines the canonical state shape and initial values for the Context Slicer store.
+ * Now expanded to include high-performance semantic registries for pre-computed 
+ * type closures, synthetic signatures, and structural contract briefs.
+ * 
+ * @core-principles
+ * 1. IS the single source of truth for the application's reactive state.
+ * 2. MUST remain pure and free of logic.
+ * 3. ENFORCES architectural consistency between the background engine and the UI.
+ *
  * @contract
  *   assertions:
  *     purity: pure
@@ -12,7 +21,10 @@
 import type { SymbolGraph, ResolutionLevel } from '../logic/symbolGraph/types.js';
 import type { WorkerPool } from '../logic/worker/WorkerPool.js';
 
-// Re-export SlicerConfig related types for use in FileSource
+/**
+ * @id packages/core/src/state/slicer-state.ts#Preset
+ * @description Defines a reusable query configuration for file selection.
+ */
 export interface Preset {
   id: string;
   name: string;
@@ -24,6 +36,10 @@ export interface Preset {
   exclusions: string[];
 }
 
+/**
+ * @id packages/core/src/state/slicer-state.ts#SlicerConfig
+ * @description Root configuration schema for the application.
+ */
 export interface SlicerConfig {
   version: number;
   project: {
@@ -50,10 +66,7 @@ export interface SlicerConfig {
 
 /**
  * @id packages/core/src/state/slicer-state.ts#FileEntry
- * @description
- * Represents a file within the application's memory.
- * Unlike the legacy version which bound directly to JSZip, this version delegates
- * data fetching to the abstract FileSource.
+ * @description Represents a file within the application's memory with lazy content loading.
  */
 export interface FileEntry {
   path: string;
@@ -81,18 +94,12 @@ export interface SanitationReport {
 
 /**
  * @id packages/core/src/state/slicer-state.ts#SlicerState
- * @description
- * The root state interface for the Zustand store.
+ * @description The root state interface for the Zustand store.
  */
 export interface SlicerState {
   // Data Source
   fileIndex: Map<string, FileEntry> | null;
   slicerConfig: SlicerConfig | null;
-  
-  /**
-   * The currently active data adapter instance.
-   * Retained in state to allow writing config changes back to the source.
-   */
   activeAdapter: import('../types/fileSource.js').FileSource | null;
 
   // App Status
@@ -101,16 +108,23 @@ export interface SlicerState {
   error: string | null;
   
   // Distributed Engine State
-  /** The persistent background processing pool */
   workerPool: WorkerPool | null;
+
+  // Semantically Distilled Context (The Dictionary)
+  /** Aggregated registry of type definitions: FilePath -> { SymbolName -> Source } */
+  typeLibrary: Map<string, Record<string, string>>;
+  /** Aggregated registry of synthetic signatures: FilePath -> { SymbolName -> Source } */
+  signatureLibrary: Map<string, Record<string, string>>;
+  /** Aggregated registry of structural contract summaries: FilePath -> BriefText */
+  contractLibrary: Map<string, string>;
 
   // Derived Data
   symbolGraph: SymbolGraph | null;
   graphStatus: GraphStatus;
-  sanitationReport: SanitationReport | null; // Mostly for Web/Zip mode
+  sanitationReport: SanitationReport | null;
   resolutionErrors: string[];
 
-  // Optimistic Assembly State (NEW)
+  // Optimistic Assembly State
   isAssembling: boolean;
   assembledPackText: string | null;
   accurateTokenCount: number | null;
@@ -120,27 +134,19 @@ export interface SlicerState {
   
   // Actions
   setTargetedPathsInput: (paths: string) => void;
-  /** Full background build of the dependency graph */
+  /** Full background build of the dependency graph and semantic libraries */
   ensureSymbolGraph: () => Promise<void>;
   /** Incremental background update for a single changed file */
   patchGraphNode: (path: string) => Promise<void>;
   
-  /**
-   * Triggers the background assembly of the context pack.
-   * Handles Summary generation, Boundary scanning, and Token counting.
-   */
+  /** Triggers the background assembly of the context pack */
   orchestrateAssembly: (
     targets: Array<{ path: string; resolution: ResolutionLevel }>,
     options: { docblocksOnly: boolean; includeBoundaryLibrary: boolean }
   ) => Promise<void>;
 
   setFileSource: (source: import('../types/fileSource.js').FileSource, sourceType: SourceType) => Promise<void>;
-  
-  /**
-   * Updates the configuration in the store and attempts to persist it via the active adapter.
-   */
   updateConfig: (newConfig: SlicerConfig) => Promise<void>;
-  
   reset: () => void;
 }
 
@@ -160,7 +166,13 @@ export const initialState: Omit<
   status: 'idle',
   source: 'none',
   error: null,
-  workerPool: null, // Initialized
+  workerPool: null,
+  
+  // Dictionary Initial State
+  typeLibrary: new Map(),
+  signatureLibrary: new Map(),
+  contractLibrary: new Map(),
+
   symbolGraph: null,
   graphStatus: 'idle',
   sanitationReport: null,

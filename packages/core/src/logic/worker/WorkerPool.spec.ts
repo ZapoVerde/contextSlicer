@@ -1,10 +1,13 @@
 /**
  * @file packages/core/src/logic/worker/WorkerPool.spec.ts
- * @stamp {"ts":"2026-02-16T12:05:00Z"}
+ * @stamp {"ts":"2026-02-16T20:38:00Z"}
  * @test-target packages/core/src/logic/worker/WorkerPool.ts
+ * @architectural-role Test Suite
  * @description
  * Unit tests for the WorkerPool orchestrator. Verifies concurrency management,
- * priority queuing, and task-to-worker correlation.
+ * priority queuing, and task-to-worker correlation. Corrected to fully satisfy 
+ * the DistilledMetadata interface requiring imports, semantic registries, 
+ * and contract briefs.
  *
  * @criticality 5. I/O & Concurrency Management.
  * @testing-layer Unit
@@ -39,11 +42,15 @@ class MockWorker {
           const result: WorkerResult = {
             taskId: task.taskId,
             payload: {
-              filePath: task.payload.path,
+              filePath: task.payload.path || 'unknown.ts',
               symbols: [],
+              imports: [], // FIX: Added missing property
               hasReexports: false,
               hasLogicActivity: true,
               isBarrel: false,
+              typeRegistry: {},
+              syntheticSignatures: {},
+              contractBrief: '\n--- STRUCTURAL CONTRACT ---\nIMPORTS: []\nEXPORTS: []'
             },
           };
           this.onmessage({ data: result } as MessageEvent);
@@ -58,7 +65,7 @@ describe('WorkerPool', () => {
   beforeEach(() => {
     vi.stubGlobal('Worker', MockWorker);
     vi.stubGlobal('navigator', { hardwareConcurrency: 4 });
-    // Stable UUID for testing correlation - must match UUID template literal type
+    // Stable UUID for testing correlation
     vi.spyOn(crypto, 'randomUUID').mockReturnValue(VALID_TEST_UUID as `${string}-${string}-${string}-${string}-${string}`);
   });
 
@@ -118,7 +125,6 @@ describe('WorkerPool', () => {
     const pool = new WorkerPool(1);
     await pool.init();
 
-    // Mock worker to return an error for this specific task
     // @ts-expect-error - Accessing private to manipulate mock behavior
     const worker = pool.workers[0] as unknown as MockWorker;
     worker.postMessage = vi.fn((task: WorkerTask) => {
