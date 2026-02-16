@@ -16,7 +16,7 @@
  *     purity: pure # React component.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ThemeProvider } from '@mui/material/styles';
 import { CssBaseline } from '@mui/material';
 import { theme } from '@slicer/core';
@@ -25,11 +25,15 @@ import { ApiFileSource } from './logic/adapters/apiFileSource.js';
 
 const App: React.FC = () => {
   const { setFileSource } = useSlicerStore();
+  const initialized = useRef(false); // Add ref to track init status
 
   useEffect(() => {
-    // Initialize connection to the local server immediately
-    const adapter = new ApiFileSource();
-    setFileSource(adapter, 'api');
+    // Only run this logic once per session
+    if (!initialized.current) {
+      initialized.current = true;
+      const adapter = new ApiFileSource();
+      setFileSource(adapter, 'api');
+    }
   }, [setFileSource]);
 
   return (

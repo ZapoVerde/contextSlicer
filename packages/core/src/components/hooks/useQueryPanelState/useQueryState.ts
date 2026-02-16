@@ -1,0 +1,83 @@
+/**
+ * @file packages/core/src/components/hooks/useQueryPanelState/useQueryState.ts
+ * @stamp {"ts":"2026-02-15T16:25:00Z"}
+ * @architectural-role State Logic
+ * @description
+ * Manages the primitive UI state for the Context Query Panel. This internal hook 
+ * acts as the state container for user inputs, including thresholds, loading status, 
+ * feedback, and resolution conflict warnings.
+ *
+ * @core-principles
+ * 1. OWNS the primitive UI state for query parameters.
+ * 2. DELEGATES logic and orchestration to sibling hooks.
+ * 3. IS NOT responsible for global store synchronization.
+ *
+ * @contract
+ *   assertions:
+ *     purity: mutates # Standard React state management.
+ *     state_ownership: [traceQuery, traceDirection, traceDepth, summaryTraceDepth, resolutionWarnings, ...]
+ *     external_io: none
+ */
+
+import { useState } from 'react';
+import type { TraceMode, PassiveOutputMode } from '../../../logic/symbolGraph/types';
+import type { TraceDirection, QueryPanelState } from './types';
+
+/**
+ * @id packages/core/src/components/hooks/useQueryPanelState/useQueryState.ts#useQueryState
+ * @description
+ * Initializes and manages all local state variables required by the Query Panel.
+ */
+export function useQueryState() {
+  const [traceQuery, setTraceQuery] = useState<string | null>(null);
+  const [traceDirection, setTraceDirection] = useState<TraceDirection>('both');
+  
+  // Resolution Boundaries
+  const [traceDepth, setTraceDepth] = useState<number>(1);
+  const [summaryTraceDepth, setSummaryTraceDepth] = useState<number>(2);
+  
+  const [traceMode, setTraceMode] = useState<TraceMode>('logical');
+  const [passiveOutputMode, setPassiveOutputMode] = useState<PassiveOutputMode>('meta');
+  
+  const [wildcardQuery, setWildcardQuery] = useState('');
+  const [exclusionWildcardQuery, setExclusionWildcardQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [resolutionWarnings, setResolutionWarnings] = useState<string[]>([]);
+  const [checkedDocsFolders, setCheckedDocsFolders] = useState<Record<string, boolean>>({});
+
+  // Construct state object matching the QueryPanelState interface
+  const state: QueryPanelState = {
+    traceQuery,
+    traceDirection,
+    traceDepth,
+    summaryTraceDepth,
+    traceMode,
+    passiveOutputMode,
+    wildcardQuery,
+    exclusionWildcardQuery,
+    isLoading,
+    error,
+    successMessage,
+    resolutionWarnings,
+    checkedDocsFolders,
+  };
+
+  return {
+    state,
+    setTraceQuery,
+    setTraceDirection,
+    setTraceDepth,
+    setSummaryTraceDepth,
+    setTraceMode,
+    setPassiveOutputMode,
+    setWildcardQuery,
+    setExclusionWildcardQuery,
+    setIsLoading,
+    setError,
+    setSuccessMessage,
+    setResolutionWarnings,
+    setCheckedDocsFolders,
+  };
+}

@@ -3,24 +3,38 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:web": "pnpm --filter @slicer/web dev",
+    "build": "pnpm build:web && pnpm build:desktop",
     "build:web": "pnpm --filter @slicer/web build",
+    "build:desktop": "pnpm --filter @slicer/desktop build",
+    "dev:web": "pnpm --filter @slicer/web dev",
     "dev:desktop": "pnpm --filter @slicer/desktop dev",
     "package:desktop": "pnpm --filter @slicer/desktop package",
     "lint": "pnpm -r lint",
-    "build": "pnpm build:web"
+    "test": "pnpm -r --parallel --aggregate-output test",
+    "// test": "Runs tests in ALL packages (core + web + desktop) at once",
+    "test:core": "pnpm --filter @slicer/core test",
+    "test:web": "pnpm --filter @slicer/web test",
+    "test:desktop": "pnpm --filter @slicer/desktop test",
+    "test:watch": "pnpm -r --parallel test -- --watch"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
+    "@types/node": "^22.19.1",
+    "@vitest/ui": "^4.0.18",
     "eslint": "^9.39.1",
+    "jsdom": "^28.0.0",
     "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.0",
-    "@types/node": "^22.19.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
   },
   "pnpm": {
     "overrides": {
       "@types/react": "^19.0.0",
       "@types/react-dom": "^19.0.0"
     }
+  },
+  "dependencies": {
+    "js-tiktoken": "^1.0.21"
   }
 }

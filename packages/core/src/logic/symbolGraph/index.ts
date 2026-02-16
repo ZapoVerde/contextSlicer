@@ -1,59 +1,162 @@
 /**
  * @file packages/core/src/logic/symbolGraph/index.ts
- * @stamp {"ts":"2025-09-29T00:13:50Z"}
- * @architectural-role Feature Orchestrator / Public API
- *
+ * @stamp {"ts":"2026-02-16T14:50:00Z"}
+ * @architectural-role Orchestrator
  * @description
- * This file serves as the main public entry point for the symbol graph generation
- * feature. It orchestrates the necessary setup, including the crucial
- * initialization of the dynamic `PathResolver`, and then invokes the AST parser
- * to perform the heavy lifting of building the graph.
+ * Orchestrates the parallel construction of the symbol graph. Processes files 
+ * in chunks to prevent network saturation and worker pool flooding. 
+ * Optimized for performance with larger batches and buffered logging.
  *
- * @responsibilities
- * 1.  IT IS THE SOLE ENTRY POINT: It exports the primary `buildSymbolGraph`
- *     function, which is the single function that the rest of the application
- *     (specifically the `useZipStore`) calls to initiate the entire graph
- *     generation process.
+ * @core-principles
+ * 1. RESOURCE MANAGEMENT: MUST process files in chunks to optimize throughput.
+ * 2. ASYNC AGGREGATION: Progressively builds the graph node-by-node.
+ * 3. EFFICIENCY: Lifts worker metadata into nodes to prevent redundant main-thread parsing.
  *
- * 2.  IT MUST INITIALIZE THE RESOLVER: Its most critical responsibility is to
- *     create and correctly configure the `PathResolver` instance. It achieves
- *     this by accepting the authoritative `aliasMap` from the state manager and
- *     passing it directly into the resolver's constructor.
- *
- * 3.  IT MUST ORCHESTRATE THE PARSER: After setting up the resolver, it calls
- *     the main `runASTParser` function, passing it the file index and the newly
- *     created resolver, along with the graph object to be populated.
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     external_io: none
  */
-import { PathResolver } from './pathResolver';
-import { runASTParser } from './astParser';
-import type { SymbolGraph } from './types';
-import type { FileEntry } from './types';
 
-// Re-export the primary types and the tracer function for convenient access.
-export { traceSymbolGraph } from './tracer';
-export type { SymbolGraph, SymbolNode, FileEntry } from './types';
+import { PathResolver } from './pathResolver.js';
+import type { SymbolGraph, SymbolNode, FileEntry } from './types.js';
+import type { WorkerPool } from '../worker/WorkerPool.js';
+import type { WorkerResult } from '../worker/types.js';
+import { LogBuffer } from './logUtils.js';
+
+// --- CONSTANTS ---
+// High throughput chunk size for local server environments
+const CHUNK_SIZE = 100;
+
+// --- PUBLIC API EXPORTS ---
+export { traceLogicalPath } from './augmentedTracer.js';
+export { generateSummary } from './summaryGenerator.js';
+export { traceSymbolGraph } from './tracer.js';
+export { scanBoundaries } from './boundaryScanner/index.js';
+export { generateBoundaryLibrary } from './typeDefinitionExtractor.js';
+export { isBarrelFile } from './analyzers/barrelDetector.js';
+export { analyzeFlow } from './analyzers/flowAnalyzer.js';
+export * from './types.js';
 
 /**
- * Builds the complete symbol dependency graph from a map of file entries.
- * This function orchestrates the path resolution and AST parsing.
- * @param fileIndex - A map of file paths to FileEntry objects from the zip store.
- * @param aliasMap - The authoritative map of monorepo aliases from the manifest.
- * @returns A promise that resolves to the SymbolGraph.
+ * @id packages/core/src/logic/symbolGraph/index.ts#buildSymbolGraph
+ * @description
+ * Builds the dependency graph using a chunked parallel strategy and buffered logging.
  */
-// --- START OF DYNAMIC ALIAS INTEGRATION (Logic Entry Point) ---
 export async function buildSymbolGraph(
   fileIndex: Map<string, FileEntry>,
   aliasMap: Record<string, string>,
-  errors: string[]
+  errors: string[],
+  workerPool: WorkerPool
 ): Promise<SymbolGraph> {
+  const logger = new LogBuffer('SymbolGraph');
   const graph: SymbolGraph = new Map();
-  // The PathResolver is now initialized with the dynamic, authoritative alias map.
   const pathResolver = new PathResolver(Array.from(fileIndex.keys()), aliasMap);
 
-  // The runASTParser function mutates the graph object passed to it.
-  await runASTParser(fileIndex, pathResolver, graph, errors);
-// --- END OF DYNAMIC ALIAS INTEGRATION (Logic Entry Point) ---
+  const relevantFiles = Array.from(fileIndex.values()).filter((f) =>
+    /\.(ts|tsx|js|jsx)$/.test(f.path)
+  );
 
-  console.log(`[SymbolGraph] Built graph with ${graph.size} symbols.`);
+  logger.push(`Indexing ${relevantFiles.length} files in batches of ${CHUNK_SIZE}...`);
+
+  const allResults: WorkerResult[] = [];
+
+  // 1. Process files in chunks to avoid overwhelming the server/browser
+  for (let i = 0; i < relevantFiles.length; i += CHUNK_SIZE) {
+    const chunk = relevantFiles.slice(i, i + CHUNK_SIZE);
+    
+    // We log batch progress but skip it in the buffer to keep noise low
+    // logger.push(`Processing batch ${Math.floor(i / CHUNK_SIZE) + 1}...`);
+    
+    const chunkTasks = chunk.map(async (file) => {
+      try {
+        const content = await file.getText();
+        return await workerPool.execute('ANALYZE_FILE', {
+          path: file.path,
+          content,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`[Worker Error] ${file.path}: ${msg}`);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(chunkTasks);
+    
+    // Aggregating results incrementally
+    results.forEach((res) => {
+      if (res) {
+        allResults.push(res);
+        processWorkerMetadata(res, graph);
+      }
+    });
+
+    // Brief yield to main thread to keep UI responsive between batches
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  // 2. LINKING PASS: Connect Nodes
+  logger.push('Performing linking pass...');
+  
+  allResults.forEach((res) => {
+    if (!res || !res.payload) return;
+    const { filePath: importerPath, imports } = res.payload;
+    
+    const importerNode = graph.get(importerPath);
+    if (!importerNode) return;
+
+    imports.forEach((importSource) => {
+      const resolvedPath = pathResolver.resolve(importerPath, importSource, errors);
+      if (resolvedPath && graph.has(resolvedPath)) {
+        const exporterNode = graph.get(resolvedPath)!;
+        importerNode.dependencies.add(resolvedPath);
+        exporterNode.dependents.add(importerPath);
+      }
+    });
+  });
+
+  logger.push(`Build complete. Nodes: ${graph.size}`);
+  logger.flush();
+  
   return graph;
+}
+
+/**
+ * Internal helper to convert distilled metadata into Graph Nodes.
+ * Lifts structural flags (re-exports, logic activity) into the node for instant lookup.
+ */
+function processWorkerMetadata(res: WorkerResult, graph: SymbolGraph) {
+  if (!res.payload) return;
+  const { filePath, symbols, hasReexports, hasLogicActivity } = res.payload;
+
+  // Create File Node
+  if (!graph.has(filePath)) {
+    graph.set(filePath, {
+      id: filePath,
+      filePath,
+      symbolName: '(file)',
+      dependencies: new Set(),
+      dependents: new Set(),
+      // Lifted Metadata: Eliminates need for main-thread AST parsing later
+      hasReexports,
+      hasLogicActivity
+    });
+  }
+
+  // Create Symbol Nodes (inherit file flags, though primarily relevant for file-level piping)
+  symbols.forEach((symbolName) => {
+    const id = `${filePath}#${symbolName}`;
+    if (!graph.has(id)) {
+      graph.set(id, {
+        id,
+        filePath,
+        symbolName,
+        dependencies: new Set(),
+        dependents: new Set(),
+        hasReexports,
+        hasLogicActivity
+      });
+    }
+  });
 }

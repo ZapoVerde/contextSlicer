@@ -1,53 +1,54 @@
-// ----- packages/desktop/server/index.ts -----
 /**
  * @file packages/desktop/server/index.ts
- * @stamp {"ts":"2025-12-05T14:40:00Z"}
+ * @stamp {"ts":"2026-02-16T22:15:00Z"}
  * @architectural-role Feature Entry Point
  *
  * @description
  * The main entry point for the Desktop/Executable backend. It establishes an Express
- * server to act as the bridge between the React UI and the local filesystem.
- * It has been refactored to use asynchronous, non-blocking I/O for file system
- * operations and integrates with the newly asynchronous `scanRepository`.
+ * server and a WebSocket server to act as the bridge between the React UI and the 
+ * local filesystem. It manages the file watcher lifecycle to broadcast changes.
  *
  * @core-principles
  * 1. IS the composition root for the local Node.js process.
- * 2. ORCHESTRATES the Express app, middleware, and route definitions.
+ * 2. ORCHESTRATES the Express app, WebSocket server, and File Watcher.
  * 3. DELEGATES specific file operations to the service layer.
- * 4. MUST NOT contain complex business logic; it routes requests to Services.
+ * 4. NOTIFIES connected clients of filesystem events in real-time.
  *
  * @api-declaration
  *   CLI: --init (Generates default config)
+ *   WS: / (WebSocket connection)
  *   GET /api/config
  *   POST /api/config
- *   GET /api/files
+ *   GET /api/files (Metadata only)
+ *   GET /api/bulk-files (Full Content Snapshot)
  *   GET /api/fs/browse
  *   GET /api/file/*
  *
  * @contract
  *   assertions:
- *     purity: mutates # Starts a network listener and writes to disk on specific actions.
- *     state_ownership: none
- *     external_io: http # Listens on localhost.
+ *     purity: mutates # Starts network listeners and filesystem watchers.
+ *     state_ownership: [watcher, wss]
+ *     external_io: [http, ws, fs, chokidar]
  */
 
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-// TYPE-GUARD-REASON: We use fs/promises here, but the check for CONFIG_PATH still needs the sync fs.
-import fs from 'fs'; 
-import fsp from 'fs/promises'; // NEW: Use fs/promises for non-blocking I/O
+import fs from 'fs';
+import fsp from 'fs/promises';
 import yaml from 'js-yaml';
 import { fileURLToPath } from 'url';
 import { isText } from 'istextorbinary';
+import http from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import chokidar from 'chokidar';
+import type { FSWatcher } from 'chokidar';
 
 import { getRuntimeConfig, RUNTIME_CWD, CONFIG_PATH, PORT } from './config.js';
-// The import of scanRepository is now an asynchronous function
-import { scanRepository } from './service/scanner.js';
+import { scanRepository, readRepositoryContent } from './service/scanner.js';
 import { DEFAULT_CONFIG_YAML } from './defaultConfig.js';
 
 // --- CLI COMMAND ORCHESTRATION ---
-// Check for --init flag to generate config file before starting the server.
 if (process.argv.includes('--init')) {
   if (fs.existsSync(CONFIG_PATH)) {
     console.error('\n❌ Error: slicer-config.yaml already exists in this directory.');
@@ -76,34 +77,82 @@ if (typeof __dirname !== 'undefined') {
 }
 
 const app = express();
+const server = http.createServer(app);
+// Listen specifically on /api/watcher-ws
+const wss = new WebSocketServer({ server, path: '/api/watcher-ws' });
 
 app.use(cors());
-app.use(express.json());
+// Increase payload limit for saving large configs if necessary, though mainly for JSON
+app.use(express.json({ limit: '50mb' }));
+
+// --- WATCHER STATE ---
+let watcher: FSWatcher | null = null;
+
+function broadcast(type: 'change' | 'add' | 'unlink', relativePath: string) {
+  const message = JSON.stringify({ type, path: relativePath });
+  wss.clients.forEach((client: WebSocket) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
+function startWatcher() {
+  if (watcher) {
+    watcher.close();
+    watcher = null;
+  }
+
+  const config = getRuntimeConfig();
+  const { repoRoot } = config;
+  const debounceMs = config.rawConfig.liveDevelopment?.watchDebounceMs || 2000;
+  
+  console.log(`[Watcher] Starting on: ${repoRoot} (Debounce: ${debounceMs}ms)`);
+
+  watcher = chokidar.watch(repoRoot, {
+    ignored: config.sanitation.denyPatterns,
+    ignoreInitial: true,
+    persistent: true,
+    awaitWriteFinish: {
+      stabilityThreshold: debounceMs,
+      pollInterval: 100,
+    },
+  });
+
+  const handleEvent = (type: 'change' | 'add' | 'unlink') => (fullPath: string) => {
+    // Convert absolute path to repo-relative path
+    const relativePath = path.relative(repoRoot, fullPath).replace(/\\/g, '/');
+    console.log(`[Watcher] ${type}: ${relativePath}`);
+    broadcast(type, relativePath);
+  };
+
+  watcher
+  .on('add', handleEvent('add'))
+  .on('change', handleEvent('change'))
+  .on('unlink', handleEvent('unlink'))
+  .on('error', (error: unknown) => console.error(`[Watcher] Error: ${error}`));
+}
+
+// Start watcher initially
+startWatcher();
 
 // --- API ROUTES ---
 
-/**
- * Returns the fully resolved configuration object and the raw YAML.
- */
 app.get('/api/config', (req, res) => {
   const config = getRuntimeConfig();
   res.json(config.rawConfig);
 });
 
 /**
- * Scans the target directory defined in the CURRENT configuration.
- * Refactored to be ASYNCHRONOUS to handle the non-blocking scanRepository.
+ * Legacy metadata-only scan.
  */
 app.get('/api/files', async (req, res) => {
   try {
     const config = getRuntimeConfig();
-    // ASYNC I/O: Await the non-blocking scanner service
     const result = await scanRepository(config);
-
     if (result.error) {
       console.warn(`[API] Scan completed with warning: ${result.error}`);
     }
-
     res.json(result.files);
   } catch (e) {
     console.error('[API] Scan failed:', e);
@@ -112,27 +161,44 @@ app.get('/api/files', async (req, res) => {
 });
 
 /**
- * Allows the UI to navigate the server's filesystem to select a Root Directory.
- * Refactored to use ASYNCHRONOUS I/O.
+ * NEW: Bulk content retrieval.
+ * Returns { "path/to/file": "content..." } for all valid text files.
  */
+app.get('/api/bulk-files', async (req, res) => {
+  try {
+    const config = getRuntimeConfig();
+    console.log('[API] Starting bulk file read...');
+    console.time('BulkRead');
+    
+    const result = await readRepositoryContent(config);
+    
+    console.timeEnd('BulkRead');
+    if (result.error) {
+      console.warn(`[API] Bulk read completed with warning: ${result.error}`);
+    }
+    
+    console.log(`[API] Serving ${Object.keys(result.files).length} files.`);
+    res.json(result.files);
+  } catch (e) {
+    console.error('[API] Bulk read failed:', e);
+    res.status(500).json({ error: 'Failed to read repository content' });
+  }
+});
+
 app.get('/api/fs/browse', async (req, res) => {
   try {
     const targetPath = (req.query.path as string) || RUNTIME_CWD;
 
-    // Use synchronous check here to avoid a try/catch block if the path is wildly wrong.
     if (!fs.existsSync(targetPath)) { 
       return res.status(404).json({ error: 'Path not found' });
     }
     
-    // ASYNC I/O: Use promises for stat and readdir
     const stats = await fsp.stat(targetPath);
     if (!stats.isDirectory()) {
       return res.status(400).json({ error: 'Not a directory' });
     }
 
     const entries = await fsp.readdir(targetPath, { withFileTypes: true });
-
-    // Filter for directories only, as we are picking a root folder.
     const folders = entries
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
       .map((e) => e.name);
@@ -141,7 +207,6 @@ app.get('/api/fs/browse', async (req, res) => {
       current: path.resolve(targetPath),
       parent: path.dirname(path.resolve(targetPath)),
       folders: folders.sort(),
-      // Use synchronous check here for simplicity on a single file check.
       isProjectRoot: fs.existsSync(path.join(targetPath, 'package.json')),
     });
   } catch (e) {
@@ -150,34 +215,19 @@ app.get('/api/fs/browse', async (req, res) => {
   }
 });
 
-/**
- * Retrieves the content of a specific file.
- * Refactored to use ASYNCHRONOUS I/O.
- */
+// Single-file fetch (Fallback/Legacy support)
 app.get(/^\/api\/file\/(.+)$/, async (req, res) => {
   const relativePath = (req.params as any)[0];
-
-  if (!relativePath) {
-    return res.status(400).send('Missing path');
-  }
+  if (!relativePath) return res.status(400).send('Missing path');
 
   const config = getRuntimeConfig();
   const fullPath = path.join(config.repoRoot, relativePath);
 
-  // Security: Prevent accessing files outside the targeted repo root
-  if (!fullPath.startsWith(config.repoRoot)) {
-    return res.status(403).send('Access denied');
-  }
-  // Use synchronous check here for simplicity on a single file check.
-  if (!fs.existsSync(fullPath)) {
-    return res.status(404).send('Not found');
-  }
+  if (!fullPath.startsWith(config.repoRoot)) return res.status(403).send('Access denied');
+  if (!fs.existsSync(fullPath)) return res.status(404).send('Not found');
 
   try {
-    // ASYNC I/O: Use fs.promises.readFile for non-blocking content retrieval
     const buffer = await fsp.readFile(fullPath);
-    
-    // isText returns null (undetermined), true (text), or false (binary).
     const checkIsText = isText(fullPath, buffer);
 
     if (checkIsText !== false) {
@@ -192,18 +242,17 @@ app.get(/^\/api\/file\/(.+)$/, async (req, res) => {
   }
 });
 
-/**
- * Saves configuration changes from the UI to disk.
- * Refactored to use ASYNCHRONOUS I/O.
- */
 app.post('/api/config', async (req, res) => {
   try {
     const newConfig = req.body;
     const yamlStr = yaml.dump(newConfig);
-    // ASYNC I/O: Use fs.promises.writeFile
     await fsp.writeFile(CONFIG_PATH, yamlStr, 'utf8');
 
-    console.log('[Server] Config updated via UI');
+    console.log('[Server] Config updated via UI. Restarting watcher...');
+    
+    // Restart watcher with new settings
+    startWatcher();
+
     res.json({ success: true });
   } catch (e) {
     console.error(e);
@@ -215,7 +264,6 @@ app.post('/api/config', async (req, res) => {
 const UI_ROOT = path.join(_dirname, '../public');
 const INDEX_HTML = path.join(UI_ROOT, 'index.html');
 
-// Check for index.html existence using sync for process startup
 if (fs.existsSync(UI_ROOT) && fs.existsSync(INDEX_HTML)) {
   app.use(express.static(UI_ROOT));
   app.get(/.*/, (req, res) => res.sendFile(INDEX_HTML));
@@ -225,7 +273,7 @@ if (fs.existsSync(UI_ROOT) && fs.existsSync(INDEX_HTML)) {
 }
 
 // --- STARTUP ---
-app.listen(PORT, '0.0.0.0', async () => {
+server.listen(PORT, '0.0.0.0', async () => {
   const startupConfig = getRuntimeConfig();
   console.log(`\n> Context Slicer running at: http://localhost:${PORT}`);
   console.log(`> Scanning: ${startupConfig.repoRoot}`);

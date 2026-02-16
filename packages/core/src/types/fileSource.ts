@@ -1,16 +1,22 @@
 /**
  * @file packages/core/src/types/fileSource.ts
- * @stamp 2025-11-24T16:30:00Z
+ * @stamp {"ts":"2026-02-16T15:00:00Z"}
  * @architectural-role Type Definition
  * @description
  * Defines the abstract interface for data retrieval and persistence. This abstraction
  * allows the core application to operate identically whether data is coming from a
- * local zip file (Web) or a live file system watcher (Desktop).
+ * local zip file (Web) or a live file system watcher (Desktop). Updated to support
+ * real-time change notifications.
  *
  * @core-principles
  * 1. IS the boundary between the Core Logic and the Platform implementation.
  * 2. MUST be implemented by platform-specific adapters.
  * 3. DECOUPLES the application state from specific data loading mechanisms.
+ *
+ * @api-declaration
+ *   export interface FileMetadata { ... }
+ *   export interface FileEvent { ... }
+ *   export interface FileSource { ... }
  *
  * @contract
  *   assertions:
@@ -33,10 +39,23 @@ export interface FileMetadata {
 }
 
 /**
+ * @id packages/core/src/types/fileSource.ts#FileEvent
+ * @description
+ * Represents a filesystem event detected by a source watcher.
+ */
+export interface FileEvent {
+  /** The type of event: 'change' (content update), 'add' (new file), 'unlink' (deletion) */
+  type: 'change' | 'add' | 'unlink';
+  /** The relative path of the affected file */
+  path: string;
+}
+
+/**
  * @id packages/core/src/types/fileSource.ts#FileSource
  * @description
  * The adapter interface that must be implemented by the hosting environment (Web or Desktop).
- * It provides access to configuration, file lists, and file contents.
+ * It provides access to configuration, file lists, and file contents, and supports
+ * optional push notifications for filesystem changes via the observer pattern.
  */
 export interface FileSource {
   /**
@@ -68,4 +87,12 @@ export interface FileSource {
    * @param path The relative path of the file.
    */
   getFileBuffer(path: string): Promise<Uint8Array>;
+
+  /**
+   * Registers a callback to be invoked when a filesystem change is detected.
+   * This method is only implemented by "Live" sources (e.g. Desktop Mode).
+   * 
+   * @param callback - Function receiving the file event.
+   */
+  onWatcherEvent?: (callback: (event: FileEvent) => void) => void;
 }

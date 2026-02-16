@@ -1,7 +1,7 @@
 
 ---
 
-# **The AI Coder Contract (No-Card Variant)**
+# **The AI Coder Contract**
 
 **Document-Type:** AI Implementation Protocol
 

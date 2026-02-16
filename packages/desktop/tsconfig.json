@@ -1,11 +1,33 @@
-{
-    "extends": "../../tsconfig.base.json",
-    "compilerOptions": {
-      "module": "NodeNext",
-      "moduleResolution": "NodeNext",
-      "outDir": "dist",
-      "rootDir": ".",
-      "types": ["node"]
-    },
-    "include": ["server/**/*", "client/**/*"]
-  }
+/**
+ * @file packages/desktop/tsconfig.json
+ * @stamp {"ts":"2026-02-16T13:50:00Z"}
+ * @architectural-role Configuration
+ * @description
+ * Defines the TypeScript compiler settings for the desktop workspace.
+ * Configured to support both Node.js server logic and React client components
+ * within a unified package structure.
+ *
+ * @core-principles
+ * 1. ENFORCES strict type safety across the desktop package.
+ * 2. ORCHESTRATES type visibility for React and Node.js environments.
+ * 3. MUST align with the project's root base configuration.
+ */
+ {
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "types": [
+      "node",
+      "react",
+      "react-dom"
+    ]
+  },
+  "include": [
+    "server/**/*",
+    "client/**/*"
+  ]
+}

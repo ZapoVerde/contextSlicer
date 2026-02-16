@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/state/slicer-state.ts
- * @stamp 2025-11-24T06:05:00Z
+ * @stamp {"ts":"2026-02-16T15:45:00Z"}
  * @architectural-role Type Definition
  * @description Defines the canonical state shape for the Context Slicer application.
  * @contract
@@ -9,7 +9,8 @@
  *     external_io: none
  */
 
-import type { SymbolGraph } from '../logic/symbolGraph/types.js';
+import type { SymbolGraph, ResolutionLevel } from '../logic/symbolGraph/types.js';
+import type { WorkerPool } from '../logic/worker/WorkerPool.js';
 
 // Re-export SlicerConfig related types for use in FileSource
 export interface Preset {
@@ -99,19 +100,40 @@ export interface SlicerState {
   source: SourceType;
   error: string | null;
   
+  // Distributed Engine State
+  /** The persistent background processing pool */
+  workerPool: WorkerPool | null;
+
   // Derived Data
   symbolGraph: SymbolGraph | null;
   graphStatus: GraphStatus;
   sanitationReport: SanitationReport | null; // Mostly for Web/Zip mode
   resolutionErrors: string[];
 
+  // Optimistic Assembly State (NEW)
+  isAssembling: boolean;
+  assembledPackText: string | null;
+  accurateTokenCount: number | null;
+
   // User Input
   targetedPathsInput: string;
   
   // Actions
   setTargetedPathsInput: (paths: string) => void;
+  /** Full background build of the dependency graph */
   ensureSymbolGraph: () => Promise<void>;
+  /** Incremental background update for a single changed file */
+  patchGraphNode: (path: string) => Promise<void>;
   
+  /**
+   * Triggers the background assembly of the context pack.
+   * Handles Summary generation, Boundary scanning, and Token counting.
+   */
+  orchestrateAssembly: (
+    targets: Array<{ path: string; resolution: ResolutionLevel }>,
+    options: { docblocksOnly: boolean; includeBoundaryLibrary: boolean }
+  ) => Promise<void>;
+
   setFileSource: (source: import('../types/fileSource.js').FileSource, sourceType: SourceType) => Promise<void>;
   
   /**
@@ -124,17 +146,29 @@ export interface SlicerState {
 
 export const initialState: Omit<
   SlicerState,
-  'setTargetedPathsInput' | 'ensureSymbolGraph' | 'setFileSource' | 'updateConfig' | 'reset'
+  | 'setTargetedPathsInput' 
+  | 'ensureSymbolGraph' 
+  | 'patchGraphNode' 
+  | 'setFileSource' 
+  | 'updateConfig' 
+  | 'reset'
+  | 'orchestrateAssembly'
 > = {
   fileIndex: null,
   slicerConfig: null,
-  activeAdapter: null, // Initialize as null
+  activeAdapter: null,
   status: 'idle',
   source: 'none',
   error: null,
-  targetedPathsInput: '',
+  workerPool: null, // Initialized
   symbolGraph: null,
   graphStatus: 'idle',
   sanitationReport: null,
   resolutionErrors: [],
+  targetedPathsInput: '',
+  
+  // Optimistic Assembly Defaults
+  isAssembling: false,
+  assembledPackText: null,
+  accurateTokenCount: null,
 };

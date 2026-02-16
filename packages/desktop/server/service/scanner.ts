@@ -1,34 +1,27 @@
 /**
  * @file packages/desktop/server/service/scanner.ts
- * @stamp {"ts":"2025-12-05T14:30:00Z"}
+ * @stamp {"ts":"2026-02-16T22:00:00Z"}
  * @architectural-role Service Logic
- *
  * @description
- * The core file system traversal engine. It recursively scans the target repository
- * based on the provided configuration. It has been refactored to use asynchronous,
- * non-blocking I/O (`fs/promises`) and concurrent directory processing to drastically
- * improve performance on local disk scans.
+ * The core file system traversal engine. Refactored to support "Bulk Loading,"
+ * allowing the server to package the entire relevant source code into a single
+ * payload to eliminate network chatter.
  *
  * @core-principles
- * 1. IS the engine for file discovery and metadata extraction.
- * 2. MUST strictly adhere to the provided `AppConfig` without implicit behaviors.
- * 3. ENFORCES safety limits to protect the runtime environment from memory exhaustion.
- *
- * @api-declaration
- *   export interface FileNode { path: string; size: number; }
- *   export interface ScanResult { files: FileNode[]; error?: string; }
- *   export function scanRepository(config: AppConfig): Promise<ScanResult>;
+ * 1. IS the engine for file discovery and content extraction.
+ * 2. MUST strictly adhere to the provided `AppConfig` exclusions.
+ * 3. ENFORCES binary file filtering to prevent payload bloat.
  *
  * @contract
  *   assertions:
- *     purity: read-only # Reads file system state, does not modify it.
- *     state_ownership: none
- *     external_io: fs # Heavy read operations on the local filesystem.
+ *     purity: read-only
+ *     external_io: fs
  */
 
 import fs from 'fs/promises';
 import path from 'path';
 import ignore from 'ignore';
+import { isText } from 'istextorbinary';
 import type { AppConfig } from '../config.js';
 
 export interface FileNode {
@@ -41,126 +34,161 @@ export interface ScanResult {
   error?: string;
 }
 
-// Safety Brake: Stop scanning if we hit this many files.
-// This prevents infinite loops (symlinks) or massive node_modules scans 
-// if the user accidentally un-configures the exclusions.
+export interface BulkContentResult {
+  files: Record<string, string>;
+  error?: string;
+}
+
+// Safety Brake
 const MAX_FILE_SCAN_LIMIT = 50000;
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 /**
- * Scans the file system starting from config.repoRoot.
- * Filters files based on config.sanitation.denyPatterns and config.sanitation.acceptedExtensions.
- * @returns A promise that resolves to the ScanResult.
+ * Scans the file system and returns metadata only.
  */
 export async function scanRepository(config: AppConfig): Promise<ScanResult> {
-  const results: FileNode[] = [];
+  // Reuse the logic via a flag, or keep separate to avoid overhead if not needed.
+  // For now, we keep the original scanner logic but optimized.
   
-  // Initialize the ignore engine with patterns from the config.
+  const results: FileNode[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ig = (ignore as any)().add(config.sanitation.denyPatterns);
-
-  // Prepare the extension whitelist for efficient lookup
+  
   const acceptedExts = config.sanitation.acceptedExtensions 
     ? new Set(config.sanitation.acceptedExtensions.map(ext => ext.toLowerCase().replace(/^\./, '')))
     : null;
-  
+
   let totalScanned = 0;
   let aborted = false;
-  
-  // Hard limit for a single file size (10MB)
-  const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
   const walk = async (dir: string): Promise<void> => {
     if (aborted) return;
 
     let entries: import('fs').Dirent[] = [];
     try {
-      // ASYNC I/O: Use fs.promises.readdir to read directory entries concurrently
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch (e) {
-      console.warn(`[Scanner] Failed to read directory: ${dir}`, e);
       return;
     }
-    
-    // Concurrently process all entries in the directory
-    const promises = entries.map(async (entry) => {
-      // Non-blocking check for abortion status within the async operation
-      if (aborted) return;
-      
-      const fullPath = path.join(dir, entry.name);
-      
-      // 2. Path Resolution
-      const relPath = path.relative(config.repoRoot, fullPath);
 
-      // 3. Exclusion Logic
-      const checkPath = entry.isDirectory() ? relPath + '/' : relPath;
+    const promises = entries.map(async (entry) => {
+      if (aborted) return;
+      const fullPath = path.join(dir, entry.name);
+      const relPath = path.relative(config.repoRoot, fullPath).replace(/\\/g, '/'); // Normalize slashes
       
-      // Skip if matched by denyPatterns.
+      const checkPath = entry.isDirectory() ? relPath + '/' : relPath;
       if (relPath && ig.ignores(checkPath)) return;
 
-      // 4. Safety Check (Increment must be careful in concurrent code)
       if (totalScanned >= MAX_FILE_SCAN_LIMIT) {
         aborted = true;
         return;
       }
       totalScanned++;
-      
+
       if (entry.isDirectory()) {
         await walk(fullPath);
       } else if (entry.isFile()) {
-        
-        // 5. Whitelist Logic (Extension Check)
         if (acceptedExts) {
           const ext = path.extname(entry.name).toLowerCase().replace('.', '');
           if (!ext || !acceptedExts.has(ext)) return;
         }
 
-        let stats: import('fs').Stats;
         try {
-          // ASYNC I/O: Use fs.promises.stat to get file metadata non-blocking
-          stats = await fs.stat(fullPath);
-        } catch (e) {
-          // If stat fails (e.g. broken symlink), just skip the file.
-          return; 
-        }
-
-        // 6. Hard Limits
-        if (stats.size > MAX_FILE_SIZE) return;
-
-        results.push({
-          path: relPath,
-          size: stats.size
-        });
+          const stats = await fs.stat(fullPath);
+          if (stats.size > MAX_FILE_SIZE) return;
+          results.push({ path: relPath, size: stats.size });
+        } catch { /* ignore */ }
       }
     });
 
-    // Wait for all file/folder processing in this directory to complete
     await Promise.all(promises);
   };
 
-  console.time('Scan');
-  
-  let rootStats: import('fs').Stats;
   try {
-      // ASYNC I/O: Check root status
-      rootStats = await fs.stat(config.repoRoot);
-  } catch {
-      return { files: [], error: `Target directory not found: ${config.repoRoot}` };
+    await walk(config.repoRoot);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { files: [], error: msg };
   }
 
-  if (rootStats.isDirectory()) {
-      await walk(config.repoRoot);
-  } else {
-      return { files: [], error: `Target path is not a directory: ${config.repoRoot}` };
-  }
-  
-  console.timeEnd('Scan');
-  
   if (aborted) {
-    return { 
-      files: results, 
-      error: `Scan limit reached (${MAX_FILE_SCAN_LIMIT} files). The scan was stopped early. Please check your exclusion rules (e.g., ensure 'node_modules' is excluded).` 
-    };
+    return { files: results, error: 'Scan limit reached.' };
   }
 
   return { files: results };
+}
+
+/**
+ * Scans the repository and returns the TEXT content of all valid files.
+ * This effectively "Zips" the repo into a JSON object for the client.
+ */
+export async function readRepositoryContent(config: AppConfig): Promise<BulkContentResult> {
+  const contentMap: Record<string, string> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ig = (ignore as any)().add(config.sanitation.denyPatterns);
+
+  const acceptedExts = config.sanitation.acceptedExtensions 
+    ? new Set(config.sanitation.acceptedExtensions.map(ext => ext.toLowerCase().replace(/^\./, '')))
+    : null;
+
+  let totalScanned = 0;
+  let aborted = false;
+
+  const walk = async (dir: string): Promise<void> => {
+    if (aborted) return;
+
+    let entries: import('fs').Dirent[] = [];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch { return; }
+
+    const promises = entries.map(async (entry) => {
+      if (aborted) return;
+      const fullPath = path.join(dir, entry.name);
+      const relPath = path.relative(config.repoRoot, fullPath).replace(/\\/g, '/');
+      
+      const checkPath = entry.isDirectory() ? relPath + '/' : relPath;
+      if (relPath && ig.ignores(checkPath)) return;
+
+      if (totalScanned >= MAX_FILE_SCAN_LIMIT) {
+        aborted = true;
+        return;
+      }
+      totalScanned++;
+
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile()) {
+        // Extension Check
+        if (acceptedExts) {
+          const ext = path.extname(entry.name).toLowerCase().replace('.', '');
+          if (!ext || !acceptedExts.has(ext)) return;
+        }
+
+        try {
+          // Read Buffer
+          const buffer = await fs.readFile(fullPath);
+          
+          // Binary Check (Optimization: Don't send images/binaries in bulk JSON)
+          if (buffer.length > MAX_FILE_SIZE) return;
+          
+          // isText returns true, false, or null (undetermined). We accept true.
+          if (isText(fullPath, buffer) === true) {
+            contentMap[relPath] = buffer.toString('utf-8');
+          }
+        } catch { /* ignore read errors */ }
+      }
+    });
+
+    await Promise.all(promises);
+  };
+
+  try {
+    await walk(config.repoRoot);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { files: {}, error: msg };
+  }
+
+  return { files: contentMap };
 }

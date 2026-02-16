@@ -1,69 +1,62 @@
 /**
  * @file packages/core/src/logic/symbolGraph/passes/1_buildAstCache.ts
- * @stamp {"ts":"2025-12-05T15:10:00Z"}
- * @architectural-role AST Generation Pass
- *
- * @description 
- * Pass 1 of the symbol graph builder. It parses relevant source files into ASTs.
- * This version uses a chunked parallel execution model to resolve the "Network 
- * Waterfall" bottleneck observed in Desktop (API) mode.
+ * @stamp {"ts":"2026-02-16T12:30:00Z"}
+ * @architectural-role Business Logic / Utility
+ * @description
+ * Provides pure functions for transforming source code into Babel Abstract 
+ * Syntax Trees (AST). Defines the canonical parser configuration used across 
+ * both main-thread and worker-thread execution contexts.
  *
  * @core-principles
- * 1. ENFORCES parallel I/O to maximize throughput on network-based file sources.
- * 2. USES chunking to prevent browser/server socket exhaustion.
- * 3. DISCARDS raw text content immediately after parsing to save memory.
+ * 1. PURITY: Must not access DOM, Window, or application state.
+ * 2. ISOLATION: Must be importable by Web Workers without side effects.
+ * 3. CONSISTENCY: ENFORCES a single source of truth for Babel parser options.
+ *
+ * @api-declaration
+ *   export const BABEL_CONFIG: parser.ParserOptions;
+ *   export function parseSourceToAst(content: string): File;
+ *
+ * @contract
+ *   assertions:
+ *     purity: pure
+ *     external_io: none
  */
+
 import * as parser from '@babel/parser';
-import type { Node } from '@babel/types';
-import type { FileEntry } from '../types';
-
-type AstCache = Map<string, Node>;
-
-// The number of concurrent file fetches/parses to perform.
-// 20 is a safe middle-ground that provides significant speedup without
-// overwhelming the local Express server or browser thread.
-const CHUNK_SIZE = 20;
+import type { File } from '@babel/types';
 
 /**
- * Pass 1: Parses all relevant source files into ASTs and caches them.
- * Optimized for Desktop mode by fetching files in parallel chunks.
+ * @id packages/core/src/logic/symbolGraph/passes/1_buildAstCache.ts#BABEL_CONFIG
+ * @description
+ * The authoritative configuration for the Babel parser. Enables TypeScript 
+ * and JSX support with error recovery to handle draft code.
  */
-export async function buildAstCache(
-  fileIndex: Map<string, FileEntry>
-): Promise<AstCache> {
-  const astCache: AstCache = new Map();
-  const relevantFiles = Array.from(fileIndex.values()).filter(f =>
-    /\.(ts|tsx|js|jsx)$/.test(f.path)
-  );
+export const BABEL_CONFIG: parser.ParserOptions = {
+  sourceType: 'module',
+  plugins: ['typescript', 'jsx'],
+  errorRecovery: true,
+  attachComment: true,
+} as const;
 
-  console.log(`[SymbolGraph] Pass 1: Parsing ${relevantFiles.length} files in chunks of ${CHUNK_SIZE}...`);
+/**
+ * @id packages/core/src/logic/symbolGraph/passes/1_buildAstCache.ts#parseSourceToAst
+ * @description
+ * Transforms a raw string of source code into a Babel AST File node.
+ * 
+ * @param content - The raw source text of the file.
+ * @returns The parsed AST File node.
+ * @throws {SyntaxError} If the code is completely unparseable (unlikely with errorRecovery).
+ */
+export function parseSourceToAst(content: string): File {
+  return parser.parse(content, BABEL_CONFIG);
+}
 
-  /**
-   * Internal helper to fetch and parse a single file.
-   * Wrapped in a try/catch to ensure one bad file doesn't kill the batch.
-   */
-  const processFile = async (file: FileEntry) => {
-    try {
-      const content = await file.getText();
-      const ast = parser.parse(content, {
-        sourceType: 'module',
-        plugins: ['typescript', 'jsx'],
-        errorRecovery: true,
-      });
-      astCache.set(file.path, ast);
-    } catch (e) {
-      console.warn(`[SymbolGraph] Pass 1: Failed to parse ${file.path}:`, e);
-    }
-  };
-
-  // Process files in chunks to avoid "Chatty I/O" sequential delays 
-  // while maintaining control over memory and socket usage.
-  for (let i = 0; i < relevantFiles.length; i += CHUNK_SIZE) {
-    const chunk = relevantFiles.slice(i, i + CHUNK_SIZE);
-    
-    // Fire off all requests in the current chunk simultaneously
-    await Promise.all(chunk.map(file => processFile(file)));
-  }
-
-  return astCache;
+/**
+ * @deprecated 
+ * The orchestration of the full AST cache has moved to the WorkerPool 
+ * via the SymbolGraph index orchestrator. Use parseSourceToAst for 
+ * individual file parsing.
+ */
+export async function buildAstCache(): Promise<never> {
+  throw new Error('Orchestration has moved to WorkerPool. Use parseSourceToAst for individual files.');
 }
