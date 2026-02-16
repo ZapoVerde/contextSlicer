@@ -1,12 +1,12 @@
 /**
  * @file packages/core/src/state/slicer-graph-manager/index.ts
- * @stamp {"ts":"2026-02-16T21:15:00Z"}
+ * @stamp {"ts":"2026-02-16T22:50:00Z"}
  * @architectural-role State Management / Composition Root
  * @description
  * The main entry point for the Graph and Assembly state slice. Orchestrates 
  * the integration of modular graph building, semantic registry management, 
- * and context pack assembly. Now captures bulk indexing results to populate 
- * semantic libraries for architectural extraction.
+ * and context pack assembly. Now ensures semantic libraries are passed to the 
+ * assembly orchestrator to prevent Layer 1.5 data vacuums.
  *
  * @core-principles
  * 1. COMPOSITION: ORCHESTRATES modular logic into a unified store slice.
@@ -55,7 +55,7 @@ export interface GraphSlice {
   ensureSymbolGraph: () => Promise<void>;
   patchGraphNode: (path: string) => Promise<void>;
   orchestrateAssembly: (
-    targets: Array<{ path: string; resolution: 'full' | 'summary' }>,
+    targets: Array<{ path: string; resolution: import('../../logic/symbolGraph/types.js').ResolutionLevel }>,
     options: { docblocksOnly: boolean; includeBoundaryLibrary: boolean }
   ) => Promise<void>;
 }
@@ -78,7 +78,7 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
    * Triggers the initial build of the dependency graph and semantic libraries.
    */
   ensureSymbolGraph: async () => {
-    const { graphStatus, fileIndex, symbolGraph, slicerConfig } = get();
+    const { graphStatus, fileIndex, symbolGraph } = get();
     
     if (graphStatus === 'building' || (graphStatus === 'ready' && symbolGraph) || !fileIndex) {
       return;
@@ -161,7 +161,14 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
    * Orchestrates the background generation of a context pack.
    */
   orchestrateAssembly: async (targets, options) => {
-    const { fileIndex, workerPool, symbolGraph, contractLibrary } = get();
+    const { 
+      fileIndex, 
+      workerPool, 
+      symbolGraph, 
+      contractLibrary,
+      typeLibrary,
+      signatureLibrary
+    } = get();
     
     if (!fileIndex || !workerPool || targets.length === 0) {
       set({ assembledPackText: null, accurateTokenCount: null, isAssembling: false });
@@ -175,7 +182,9 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
         workerPool,
         fileIndex,
         symbolGraph,
-        contractLibrary
+        contractLibrary,
+        typeLibrary,
+        signatureLibrary
       });
 
       if (result) {

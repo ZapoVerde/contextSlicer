@@ -1,25 +1,26 @@
 /**
  * @file packages/core/src/logic/worker/types.ts
- * @stamp {"ts":"2026-02-16T18:30:00Z"}
+ * @stamp {"ts":"2026-02-16T22:40:00Z"}
  * @architectural-role Type Definition
  * @description
- * Defines the messaging protocol and data structures for background workers. 
- * Facilitates the transfer of distilled architectural metadata, including 
- * pre-computed type closures, synthetic signatures, and structural contract 
- * briefs for dependency mapping.
+ * Defines the canonical messaging protocol and data structures for background 
+ * workers. Facilitates the transfer of distilled architectural metadata, 
+ * including pre-computed type closures, synthetic signatures, and structural 
+ * contract briefs for dependency mapping and context pack assembly.
  *
  * @core-principles
  * 1. IS the single source of truth for the Worker messaging protocol.
- * 2. MUST use serializable types (plain objects) to ensure cross-thread compatibility.
+ * 2. MUST use serializable types (plain objects/records) to ensure cross-thread 
+ *    compatibility via the Structured Clone algorithm.
  * 3. ENFORCES the separation of heavy AST-based processing from UI-bound state.
  *
  * @api-declaration
- * export type TaskType = 'ANALYZE_FILE' | 'INITIALIZE' | 'ASSEMBLE_PACK';
- * export interface DistilledMetadata { ... }
- * export interface AssemblyPayload { ... }
- * export interface AssemblyResult { ... }
- * export interface WorkerTask { ... }
- * export interface WorkerResult { ... }
+ *   export type TaskType = 'ANALYZE_FILE' | 'INITIALIZE' | 'ASSEMBLE_PACK';
+ *   export interface DistilledMetadata { ... }
+ *   export interface AssemblyPayload { ... }
+ *   export interface AssemblyResult { ... }
+ *   export interface WorkerTask { ... }
+ *   export interface WorkerResult { ... }
  *
  * @contract
  *   assertions:
@@ -60,7 +61,7 @@ export interface DistilledMetadata {
    */
   syntheticSignatures: Record<string, string>;
   /**
-   * NEW: A human-readable summary of the file's imports and exports.
+   * A human-readable summary of the file's imports and exports.
    * Used for "Docblocks Only" mode to provide a dependency map.
    */
   contractBrief: string;
@@ -68,6 +69,7 @@ export interface DistilledMetadata {
 
 /**
  * Data required by the worker to build a multi-layered context pack.
+ * Updated to include serialized semantic registries for Layer 1.5 generation.
  */
 export interface AssemblyPayload {
   /** Map of path to resolution type (e.g., 'full' or 'summary') */
@@ -75,10 +77,20 @@ export interface AssemblyPayload {
   /** Plain object mapping file paths to their raw text content */
   files: Record<string, string>;
   /** 
-   * NEW: Pre-computed contract briefs for high-speed assembly in Docblock mode.
+   * Pre-computed contract briefs for high-speed assembly in Docblock mode.
    * Key: FilePath. Value: ContractBrief string.
    */
   contractLibrary: Record<string, string>;
+  /**
+   * Serialized registry of type definitions.
+   * Key: FilePath. Value: Record of { SymbolName -> Source }.
+   */
+  typeLibrary: Record<string, Record<string, string>>;
+  /**
+   * Serialized registry of synthetic signatures.
+   * Key: FilePath. Value: Record of { SymbolName -> Source }.
+   */
+  signatureLibrary: Record<string, Record<string, string>>;
   /** Options for output formatting */
   options: {
     docblocksOnly: boolean;

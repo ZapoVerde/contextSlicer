@@ -1,11 +1,12 @@
 /**
  * @file packages/core/src/state/slicer-graph-manager/assemblyOrchestrator.ts
- * @stamp {"ts":"2026-02-16T21:45:00Z"}
+ * @stamp {"ts":"2026-02-16T22:45:00Z"}
  * @architectural-role Business Logic / Producer
  * @description
  * Orchestrates the multi-stage pipeline for context pack generation. Manages 
  * background assembly requests, shallow boundary dependency resolution, and 
- * data serialization for worker thread communication.
+ * data serialization for worker thread communication. Updated to serialize 
+ * and pipe semantic registries to the worker.
  *
  * @core-principles
  * 1. ORCHESTRATION: MUST manage the transition from UI selection to binary assembly.
@@ -36,6 +37,8 @@ interface AssemblyDeps {
   fileIndex: Map<string, FileEntry>;
   symbolGraph: SymbolGraph | null;
   contractLibrary: Map<string, string>;
+  typeLibrary: Map<string, Record<string, string>>;
+  signatureLibrary: Map<string, Record<string, string>>;
 }
 
 /**
@@ -49,7 +52,14 @@ export async function orchestrateAssembly(
   options: { docblocksOnly: boolean; includeBoundaryLibrary: boolean },
   deps: AssemblyDeps
 ): Promise<AssemblyResult | null> {
-  const { workerPool, fileIndex, symbolGraph, contractLibrary } = deps;
+  const { 
+    workerPool, 
+    fileIndex, 
+    symbolGraph, 
+    contractLibrary, 
+    typeLibrary, 
+    signatureLibrary 
+  } = deps;
 
   // 1. Generate Correlation ID
   const requestId = crypto.randomUUID();
@@ -95,10 +105,22 @@ export async function orchestrateAssembly(
       contractLibPayload[path] = brief;
     });
 
+    const typeLibPayload: Record<string, Record<string, string>> = {};
+    typeLibrary.forEach((records, path) => {
+      typeLibPayload[path] = records;
+    });
+
+    const signatureLibPayload: Record<string, Record<string, string>> = {};
+    signatureLibrary.forEach((records, path) => {
+      signatureLibPayload[path] = records;
+    });
+
     const payload: AssemblyPayload = {
       targets,
       files: fileContents,
       contractLibrary: contractLibPayload,
+      typeLibrary: typeLibPayload,
+      signatureLibrary: signatureLibPayload,
       options,
     };
 

@@ -1,17 +1,18 @@
 /**
  * @file packages/core/src/logic/worker/packAssembler.ts
- * @stamp {"ts":"2026-02-16T21:55:00Z"}
- * @architectural-role Business Logic / Logic Module
+ * @stamp {"ts":"2026-02-16T22:55:00Z"}
+ * @architectural-role Business Logic / Orchestrator
  * @description
- * Implements the "Construction Engine" for the context pack generation phase. 
- * Orchestrates the concatenation of spatial metadata, boundary definitions, 
- * and source logic. Now supports "Docblocks Only" mode by stitching JSDoc 
- * preambles with pre-computed structural contract briefs (Imports/Exports).
+ * Implements the "Construction Engine" for the context pack generation phase 
+ * within the worker thread. Orchestrates the concatenation of spatial metadata, 
+ * boundary definitions, and source logic. Consumes pre-computed semantic 
+ * registries to ensure high-performance architectural distillation.
  *
  * @core-principles
  * 1. IS a pure logic module for multi-file assembly.
  * 2. OWNS the accurate token counting logic (cl100k_base).
- * 3. SIGNAL-PRIORITY: Ensures architectural context is preserved even when code is omitted.
+ * 3. SIGNAL-PRIORITY: Ensures architectural context is preserved via pre-computed 
+ *    semantic contracts even when full implementation bodies are omitted.
  *
  * @api-declaration
  *   export async function assemblePack(
@@ -40,9 +41,9 @@ import { extractFilePreamble } from '../preambleUtils.js';
 /**
  * @id packages/core/src/logic/worker/packAssembler.ts#assemblePack
  * @description
- * Constructs the final context pack string. Corrects the "Paradox" by providing 
- * structural contracts for boundary files and optionally for all files 
- * when in Docblock-only mode.
+ * Constructs the final context pack string. Corrects the "Semantic Vacuum" by 
+ * deserializing and utilizing the type and signature libraries for 
+ * Layer 1.5 boundary extraction.
  * 
  * @param data - The payload containing targets, file content, and pre-computed contracts.
  * @param tokenizer - The initialized Tiktoken instance for token counting.
@@ -51,12 +52,20 @@ export async function assemblePack(
   data: AssemblyPayload,
   tokenizer: Tiktoken
 ): Promise<AssemblyResult> {
-  const { targets, files, contractLibrary, options } = data;
+  const { 
+    targets, 
+    files, 
+    contractLibrary, 
+    typeLibrary, 
+    signatureLibrary, 
+    options 
+  } = data;
+  
   const pack: string[] = [];
-  
   const targetAsts = new Map<string, File>();
-  const fileIndexMock = new Map<string, any>();
   
+  // Create a minimal FileIndex adapter for scanBoundaries compatibility
+  const fileIndexMock = new Map<string, any>();
   Object.keys(files).forEach(path => {
     fileIndexMock.set(path, {
       path,
@@ -132,11 +141,21 @@ export async function assemblePack(
     const boundarySymbols = scanBoundaries(fileIndexMock as any, targetAsts);
 
     if (boundarySymbols.length > 0) {
-      // Use the provided contractLibrary for semantic boundary extraction
+      // Deserialize the libraries into Map structures expected by generateBoundaryLibrary
+      const typeLibMap = new Map<string, Record<string, string>>();
+      Object.entries(typeLibrary).forEach(([path, data]) => {
+        typeLibMap.set(path, data);
+      });
+
+      const signLibMap = new Map<string, Record<string, string>>();
+      Object.entries(signatureLibrary).forEach(([path, data]) => {
+        signLibMap.set(path, data);
+      });
+
       const boundaryLibrary = await generateBoundaryLibrary(
         boundarySymbols,
-        new Map(), // Type signatures handled via synthetic signatures if available
-        new Map()  // Signature Library should ideally be passed in payload too
+        typeLibMap,
+        signLibMap
       );
       
       if (boundaryLibrary) {

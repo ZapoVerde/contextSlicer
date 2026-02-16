@@ -1,6 +1,6 @@
 /**
  * @file packages/core/test/specs/06-output-formatting.spec.ts
- * @stamp {"ts":"2026-02-16T22:55:00Z"}
+ * @stamp {"ts":"2026-02-16T23:05:00Z"}
  * @architectural-role Test Suite
  * @description
  * Validates the Three-Layer Assembly engine. Verifies the generated string 
@@ -30,7 +30,7 @@ describe('Context Pack Assembly & Formatting', () => {
 
   /**
    * Helper to simulate a full generation flow from state to string.
-   * Matches the updated signature of the pack assembler.
+   * Leverages the NetworkHarness to provide the semantic registries.
    */
   async function generateFullPack(
     state: Partial<QueryPanelState>, 
@@ -43,13 +43,13 @@ describe('Context Pack Assembly & Formatting', () => {
     const contractLibrary = harness.getContractLib();
     
     // 1. Discover Instructions
-    const queryState = {
+    const queryState: QueryPanelState = {
       traceQuery: null,
-      traceDirection: 'dependencies' as const,
+      traceDirection: 'dependencies',
       traceDepth: 0,
       summaryTraceDepth: 0,
-      traceMode: 'logical' as const,
-      passiveOutputMode: 'meta' as const,
+      traceMode: 'logical',
+      passiveOutputMode: 'meta',
       wildcardQuery: '',
       exclusionWildcardQuery: '',
       isLoading: false,
@@ -63,16 +63,17 @@ describe('Context Pack Assembly & Formatting', () => {
     const { paths: instructions } = await discoverContextPaths(fileIndex, graph, queryState);
     
     // 2. Parse Instructions (DSL)
-    const rawInput = instructions.join(', ');
-    const targets = rawInput.split(', ').map(s => {
-      if (s.endsWith(':summary')) return { path: s.replace(':summary', ''), resolution: 'summary' as const };
+    const targets = instructions.map(s => {
+      if (s.endsWith(':summary')) {
+        return { path: s.replace(':summary', ''), resolution: 'summary' as const };
+      }
       return { path: s, resolution: 'full' as const };
-    }).filter(t => t.path !== '');
+    });
 
     // 3. Pre-Flight (Load Content + AST)
     const preFlightData = await runPreFlight(targets, fileIndex);
 
-    // 4. Assemble with Semantic Libraries
+    // 4. Assemble with Semantic Libraries (Mirroring Worker Logic)
     return await assembleContextPack(
       fileIndex, 
       targets, 
@@ -125,7 +126,7 @@ describe('Context Pack Assembly & Formatting', () => {
     expect(pack).toContain('=== packages/web/App.tsx ===');
     expect(pack).toContain('[PREAMBLE & CONTRACT]');
 
-    // Verify structural brief content (Imports/Exports)
+    // Verify structural brief content (Imports/Exports) from contractLibrary
     expect(pack).toContain('--- STRUCTURAL CONTRACT ---');
     expect(pack).toContain('IMPORTS:');
     expect(pack).toContain("@prism/shared-types/inheritance");
@@ -142,11 +143,12 @@ describe('Context Pack Assembly & Formatting', () => {
     expect(pack).toContain('--- LAYER 1.5: BOUNDARY LIBRARY ---');
     expect(pack).toContain('=== PROJECT BOUNDARY DEFINITIONS ===');
     
-    // Semantic verification: Interface should be extracted from dictionary
+    // Semantic verification: Interface should be extracted from the dictionary
     expect(pack).toContain('interface LegacyUser');
+    expect(pack).toContain('oldId: number');
   });
 
-  it('should apply the [SEED] marker to Full Code and [SUMMARY] to distallations', async () => {
+  it('should apply the [SEED] marker to Full Code and [SUMMARY] to distillations', async () => {
     const pack = await generateFullPack({
       traceQuery: 'packages/web/App.tsx',
       traceDepth: 0,
@@ -156,18 +158,28 @@ describe('Context Pack Assembly & Formatting', () => {
     expect(pack).toContain('=== packages/web/App.tsx ===');
     expect(pack).toContain('[SEED - Full Implementation]');
 
+    // ScentChainA is a dependency reached via trace
     expect(pack).toContain('=== packages/web/ScentChainA.ts ===');
     expect(pack).toContain('[SUMMARY - Dependency Brief]');
   });
 
   it('should generate an ASCII file tree wrapping the spatial map', async () => {
     const pack = await generateFullPack({
-      wildcardQuery: 'packages/web/App.tsx, packages/web/TODO.ts'
+      wildcardQuery: 'packages/web/App.tsx, packages/web/userService.ts'
     });
 
     expect(pack).toContain('```text');
     expect(pack).toContain('App.tsx');
-    expect(pack).toContain('TODO.ts');
+    expect(pack).toContain('userService.ts');
     expect(pack).toContain('```');
+  });
+
+  it('should omit Layer 1.5 entirely if the boundary library is empty', async () => {
+    // A self-contained file with no external dependencies
+    const pack = await generateFullPack({
+      wildcardQuery: 'packages/shared-types/enums.ts'
+    });
+
+    expect(pack).not.toContain('--- LAYER 1.5: BOUNDARY LIBRARY ---');
   });
 });
