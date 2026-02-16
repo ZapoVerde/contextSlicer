@@ -77,7 +77,8 @@ if (typeof __dirname !== 'undefined') {
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// Listen specifically on /api/watcher-ws
+const wss = new WebSocketServer({ server, path: '/api/watcher-ws' });
 
 app.use(cors());
 app.use(express.json());

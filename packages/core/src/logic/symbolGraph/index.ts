@@ -1,62 +1,47 @@
 /**
  * @file packages/core/src/logic/symbolGraph/index.ts
- * @stamp {"ts":"2026-02-16T18:45:00Z"}
+ * @stamp {"ts":"2026-02-16T13:20:00Z"}
  * @architectural-role Orchestrator
  * @description
- * The authoritative public API for the symbol graph subsystem. Orchestrates 
- * the parallelized construction of the code graph using the Worker Pool. 
- * Aggregates distilled metadata from background threads to build a 
- * physical dependency network with cross-file linking.
+ * Orchestrates the parallel construction of the symbol graph. Processes files 
+ * in chunks to prevent network saturation and worker pool flooding. 
+ * Optimized for performance with larger batches and buffered logging.
  *
  * @core-principles
- * 1. ASYNC ORCHESTRATION: MUST leverage the Worker Pool for all heavy parsing.
- * 2. AGGREGATION: IS responsible for reassembling worker results into the main Graph.
- * 3. DISTRIBUTED LINKING: ENFORCES the "Zero-AST Return" policy by linking via 
- *    distilled import strings in the main thread.
- *
- * @api-declaration
- *   export function buildSymbolGraph(index, aliasMap, errors, workerPool): Promise<SymbolGraph>;
- *   export { traceLogicalPath } from './augmentedTracer';
- *   export { generateSummary } from './summaryGenerator';
- *   export * from './types';
+ * 1. RESOURCE MANAGEMENT: MUST process files in chunks (Default: 100) to optimize throughput.
+ * 2. ASYNC AGGREGATION: Progressively builds the graph node-by-node.
+ * 3. EFFICIENCY: Minimizes main-thread blocking via yield-points and buffered I/O.
  *
  * @contract
  *   assertions:
- *     purity: pure # Orchestrates state but returns a new Graph instance.
+ *     purity: pure
  *     external_io: none
  */
 
 import { PathResolver } from './pathResolver.js';
 import type { SymbolGraph, SymbolNode, FileEntry } from './types.js';
 import type { WorkerPool } from '../worker/WorkerPool.js';
+import type { WorkerResult } from '../worker/types.js';
+import { LogBuffer } from './logUtils.js';
+
+// --- CONSTANTS ---
+// Increased from 20 to 100 to reduce context switching overhead for small/medium repos.
+const CHUNK_SIZE = 100;
 
 // --- PUBLIC API EXPORTS ---
-
-// 1. Tracing and Distillation Logic
 export { traceLogicalPath } from './augmentedTracer.js';
 export { generateSummary } from './summaryGenerator.js';
 export { traceSymbolGraph } from './tracer.js';
-
-// 2. Boundary Discovery & Extraction (Required by Pack Assembler)
 export { scanBoundaries } from './boundaryScanner/index.js';
 export { generateBoundaryLibrary } from './typeDefinitionExtractor.js';
-
-// 3. Structural Analyzers
 export { isBarrelFile } from './analyzers/barrelDetector.js';
 export { analyzeFlow } from './analyzers/flowAnalyzer.js';
-
-// 4. Shared Types
 export * from './types.js';
 
 /**
  * @id packages/core/src/logic/symbolGraph/index.ts#buildSymbolGraph
  * @description
- * Builds the complete symbol dependency graph asynchronously using the Worker Pool.
- * 
- * @param fileIndex - The registry of available files.
- * @param aliasMap - Path aliases for module resolution.
- * @param errors - Collection for reporting non-fatal analysis errors.
- * @param workerPool - The persistent worker pool for parallel processing.
+ * Builds the dependency graph using a chunked parallel strategy and buffered logging.
  */
 export async function buildSymbolGraph(
   fileIndex: Map<string, FileEntry>,
@@ -64,71 +49,55 @@ export async function buildSymbolGraph(
   errors: string[],
   workerPool: WorkerPool
 ): Promise<SymbolGraph> {
+  const logger = new LogBuffer('SymbolGraph');
   const graph: SymbolGraph = new Map();
   const pathResolver = new PathResolver(Array.from(fileIndex.keys()), aliasMap);
 
-  // 1. Identify files requiring analysis (JS/TS source files)
   const relevantFiles = Array.from(fileIndex.values()).filter((f) =>
     /\.(ts|tsx|js|jsx)$/.test(f.path)
   );
 
-  console.log(`[SymbolGraph] Dispatching ${relevantFiles.length} files to Worker Pool...`);
+  logger.push(`Indexing ${relevantFiles.length} files in batches of ${CHUNK_SIZE}...`);
 
-  // 2. Dispatch analysis tasks in parallel (Pass 1 & 2 in Workers)
-  const analysisPromises = relevantFiles.map(async (file) => {
-    try {
-      const content = await file.getText();
-      const result = await workerPool.execute('ANALYZE_FILE', {
-        path: file.path,
-        content,
-      });
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`[Worker Error] ${file.path}: ${msg}`);
-      return null;
-    }
-  });
+  const allResults: WorkerResult[] = [];
 
-  const results = await Promise.all(analysisPromises);
-
-  // 3. AGGREGATION PASS: Create Nodes (The Dots)
-  results.forEach((res) => {
-    if (!res || !res.payload) return;
-    const metadata = res.payload;
-    const filePath = metadata.filePath;
-
-    // Create File-level node
-    if (!graph.has(filePath)) {
-      graph.set(filePath, {
-        id: filePath,
-        filePath,
-        symbolName: '(file)',
-        dependencies: new Set(),
-        dependents: new Set(),
-      });
-    }
-
-    // Create Symbol-level nodes
-    metadata.symbols.forEach((symbolName) => {
-      const id = `${filePath}#${symbolName}`;
-      if (!graph.has(id)) {
-        graph.set(id, {
-          id,
-          filePath,
-          symbolName,
-          dependencies: new Set(),
-          dependents: new Set(),
+  // 1. Process files in chunks to avoid overwhelming the server/browser
+  for (let i = 0; i < relevantFiles.length; i += CHUNK_SIZE) {
+    const chunk = relevantFiles.slice(i, i + CHUNK_SIZE);
+    logger.push(`Processing batch ${Math.floor(i / CHUNK_SIZE) + 1}...`);
+    
+    const chunkTasks = chunk.map(async (file) => {
+      try {
+        const content = await file.getText();
+        return await workerPool.execute('ANALYZE_FILE', {
+          path: file.path,
+          content,
         });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`[Worker Error] ${file.path}: ${msg}`);
+        return null;
       }
     });
-  });
 
-  // 4. LINKING PASS: Connect Nodes (The Lines)
-  // We process the distilled import strings returned by the workers.
-  console.log('[SymbolGraph] Performing main-thread linking pass...');
+    const results = await Promise.all(chunkTasks);
+    
+    // Aggregating results incrementally to prevent a massive single-frame block at the end
+    results.forEach((res) => {
+      if (res) {
+        allResults.push(res);
+        processWorkerMetadata(res, graph);
+      }
+    });
+
+    // Brief yield to main thread to keep UI responsive between batches
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+
+  // 2. LINKING PASS: Connect Nodes
+  logger.push('Performing linking pass...');
   
-  results.forEach((res) => {
+  allResults.forEach((res) => {
     if (!res || !res.payload) return;
     const { filePath: importerPath, imports } = res.payload;
     
@@ -136,21 +105,50 @@ export async function buildSymbolGraph(
     if (!importerNode) return;
 
     imports.forEach((importSource) => {
-      // Resolve the import string to an absolute project path
       const resolvedPath = pathResolver.resolve(importerPath, importSource, errors);
-      
-      // Check if the resolved file exists in our graph
       if (resolvedPath && graph.has(resolvedPath)) {
         const exporterNode = graph.get(resolvedPath)!;
-        
-        // Establish bidirectional physical edge
         importerNode.dependencies.add(resolvedPath);
         exporterNode.dependents.add(importerPath);
       }
     });
   });
 
-  console.log(`[SymbolGraph] Build complete. Total nodes: ${graph.size}`);
+  logger.push(`Build complete. Nodes: ${graph.size}`);
+  logger.flush();
   
   return graph;
+}
+
+/**
+ * Internal helper to convert distilled metadata into Graph Nodes.
+ */
+function processWorkerMetadata(res: WorkerResult, graph: SymbolGraph) {
+  if (!res.payload) return;
+  const { filePath, symbols } = res.payload;
+
+  // Create File Node
+  if (!graph.has(filePath)) {
+    graph.set(filePath, {
+      id: filePath,
+      filePath,
+      symbolName: '(file)',
+      dependencies: new Set(),
+      dependents: new Set(),
+    });
+  }
+
+  // Create Symbol Nodes
+  symbols.forEach((symbolName) => {
+    const id = `${filePath}#${symbolName}`;
+    if (!graph.has(id)) {
+      graph.set(id, {
+        id,
+        filePath,
+        symbolName,
+        dependencies: new Set(),
+        dependents: new Set(),
+      });
+    }
+  });
 }

@@ -1,11 +1,11 @@
 /**
  * @file packages/desktop/client/logic/adapters/apiFileSource.ts
- * @stamp {"ts":"2026-02-16T16:20:00Z"}
+ * @stamp {"ts":"2026-02-16T21:15:00Z"}
  * @architectural-role Data Adapter
  * @description
  * A concrete implementation of FileSource that communicates with the local 
  * Express API and establishes a WebSocket connection for real-time filesystem 
- * events.
+ * events. Includes resilient reconnection logic and proxied-environment support.
  *
  * @core-principles
  * 1. IS the bridge between the Desktop UI and the Local Server.
@@ -37,35 +37,60 @@ export class ApiFileSource implements FileSource {
 
   /**
    * Establishes the WebSocket connection to the server for push notifications.
-   * Includes simple retry logic for robustness.
+   * Detects protocol and host dynamically to handle local and proxied dev environments.
    */
   private connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/`;
-
-    console.log(`[ApiFileSource] Connecting to watcher at: ${wsUrl}`);
+    const isSecure = window.location.protocol === 'https:';
+    const protocol = isSecure ? 'wss:' : 'ws:';
     
-    this.ws = new WebSocket(wsUrl);
+    // In dev mode with Vite, host includes the port (e.g. localhost:5173).
+    // In production, it's the port the app is serving on (e.g. localhost:3000).
+    const host = window.location.host;
+    
+    // Connect to the root of the current host. 
+    // The Vite proxy (dev) or the bundled server (prod) must handle the upgrade.
+    // Use a specific sub-path to avoid colliding with Vite/HMR
+    const wsUrl = `${protocol}//${host}/api/watcher-ws`;
 
-    this.ws.onmessage = (msg) => {
-      try {
-        const data = JSON.parse(msg.data) as FileEvent;
-        if (this.eventCallback) {
-          this.eventCallback(data);
+    console.log(`[ApiFileSource] Initializing watcher connection to: ${wsUrl}`);
+    
+    try {
+      this.ws = new WebSocket(wsUrl);
+
+      this.ws.onopen = () => {
+        console.log(`[ApiFileSource] Watcher connection established.`);
+      };
+
+      this.ws.onmessage = (msg) => {
+        try {
+          const data = JSON.parse(msg.data) as FileEvent;
+          console.log(`[ApiFileSource] Watcher Event: ${data.type} -> ${data.path}`);
+          if (this.eventCallback) {
+            this.eventCallback(data);
+          }
+        } catch (e) {
+          console.error('[ApiFileSource] Failed to parse watcher message:', e);
         }
-      } catch (e) {
-        console.error('[ApiFileSource] Failed to parse watcher message', e);
-      }
-    };
+      };
 
-    this.ws.onclose = () => {
-      console.warn('[ApiFileSource] Watcher connection lost. Retrying in 5s...');
-      setTimeout(() => this.connectWebSocket(), 5000);
-    };
+      this.ws.onclose = (event) => {
+        if (event.code !== 1000) {
+          console.warn(`[ApiFileSource] Connection lost (Code: ${event.code}). Retrying in 5s...`);
+          setTimeout(() => this.connectWebSocket(), 5000);
+        }
+      };
 
-    this.ws.onerror = (err) => {
-      console.error('[ApiFileSource] Watcher WebSocket Error:', err);
-    };
+      this.ws.onerror = (err) => {
+        // Detailed error logging for environment diagnostics
+        console.error('[ApiFileSource] WebSocket Error Detected:', {
+          url: wsUrl,
+          readyState: this.ws?.readyState,
+          error: err
+        });
+      };
+    } catch (err) {
+      console.error('[ApiFileSource] Failed to instantiate WebSocket:', err);
+    }
   }
 
   async getConfig(): Promise<SlicerConfig> {

@@ -29,6 +29,8 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.10",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "chokidar": "^4.0.3",

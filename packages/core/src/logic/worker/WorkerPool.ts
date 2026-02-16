@@ -1,14 +1,14 @@
 /**
  * @file packages/core/src/logic/worker/WorkerPool.ts
- * @stamp {"ts":"2026-02-16T11:05:00Z"}
+ * @stamp {"ts":"2026-02-16T13:30:00Z"}
  * @architectural-role Orchestrator / Concurrency Manager
  * @description
  * Manages a persistent pool of Web Workers for background code analysis. 
- * Implements a priority queue to ensure user-initiated actions (like generating 
- * a pack) preempt background indexing tasks.
+ * Implements a priority queue and concurrency limits to balance throughput 
+ * against main-thread responsiveness.
  *
  * @core-principles
- * 1. OWNS the concurrency limit strategy (hardwareConcurrency - 1).
+ * 1. OWNS the concurrency limit strategy (hardwareConcurrency - 1, capped at 4).
  * 2. ENFORCES task prioritization (High > Normal > Low).
  * 3. MUST handle worker termination and correlation errors gracefully.
  *
@@ -40,17 +40,27 @@ const PRIORITY_MAP: Record<TaskPriority, number> = {
   low: 2,
 };
 
+/**
+ * @id packages/core/src/logic/worker/WorkerPool.ts#WorkerPool
+ * @description
+ * Orchestrates a pool of background workers to perform AST analysis.
+ */
 export class WorkerPool {
   private workers: Worker[] = [];
   private idleWorkers: Worker[] = [];
   private taskQueue: PendingTask[] = [];
   private activeTasks = new Map<string, PendingTask>();
-  private maxWorkers: number;
+  private readonly maxWorkers: number;
   private isInitialized = false;
 
   constructor(maxWorkers?: number) {
-    // Leave one core for the UI thread if possible
-    this.maxWorkers = maxWorkers ?? Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
+    // OPTIMIZATION: Cap at 4 workers by default. 
+    // Spawning 8+ workers on high-core machines often incurs more serialization 
+    // overhead than the parallelization gains for code analysis tasks.
+    const systemCores = navigator.hardwareConcurrency || 2;
+    const defaultLimit = Math.min(4, Math.max(1, systemCores - 1));
+    
+    this.maxWorkers = maxWorkers ?? defaultLimit;
   }
 
   /**
@@ -63,7 +73,7 @@ export class WorkerPool {
     await Promise.all(workerPromises);
 
     this.isInitialized = true;
-    console.log(`[WorkerPool] Initialized with ${this.workers.length} workers.`);
+    console.log(`[WorkerPool] Initialized with ${this.workers.length} workers (Limit: ${this.maxWorkers}).`);
   }
 
   /**
@@ -90,7 +100,6 @@ export class WorkerPool {
   }
 
   private async createWorker(): Promise<void> {
-    // Note: URL path is relative to this source file; Vite handles the resolution.
     const worker = new Worker(new URL('./worker.ts', import.meta.url), {
       type: 'module',
     });

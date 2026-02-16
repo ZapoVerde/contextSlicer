@@ -1,11 +1,12 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/index.ts
- * @stamp {"ts":"2026-02-16T06:50:00Z"}
- * @architectural-role Custom Hook / Composition Root
+ * @stamp {"ts":"2026-02-16T14:30:00Z"}
+ * @architectural-role Feature Entry Point
  * @description
  * The primary orchestrator for the Targeted Pack Manager subsystem. It composes 
  * state management, statistics, and target parsing with high-performance 
- * parallel services for AST extraction and layered context assembly.
+ * parallel services for AST extraction and layered context assembly. 
+ * Now supports accurate token reporting via the progressive accuracy stats hook.
  * 
  * @core-principles
  * 1. IS the public entry point for the Targeted Pack management subsystem.
@@ -22,28 +23,28 @@
  *     external_io: [clipboard, browser_download]
  */
 
-import { useCallback, useMemo } from 'react';
-import { useSlicerStore } from '../../../state/useSlicerStore';
-import { useFreshnessStatus } from '../../../hooks/useFreshnessStatus';
+import { useCallback } from 'react';
+import { useSlicerStore } from '../../../state/useSlicerStore.js';
+import { useFreshnessStatus } from '../../../hooks/useFreshnessStatus.js';
 
 // Sub-Hooks
-import { useTargetParsing } from './useTargetParsing';
-import { usePackOptions } from './usePackOptions';
-import { usePackStats } from './usePackStats';
+import { useTargetParsing } from './useTargetParsing.js';
+import { usePackOptions } from './usePackOptions.js';
+import { usePackStats } from './usePackStats.js';
 
 // Logic & Services
-import { runPreFlight } from './preFlightService';
-import { assembleContextPack } from './packAssembler';
-import * as io from './ioHandlers';
+import { runPreFlight } from './preFlightService.js';
+import { assembleContextPack } from './packAssembler.js';
+import * as io from './ioHandlers.js';
 
 // Types
-import type { TargetedPackHookResult } from './types';
+import type { TargetedPackHookResult } from './types.js';
 
 /**
  * @id packages/core/src/components/hooks/useTargetedPackManager/index.ts#useTargetedPackManager
  * @description
  * Provides a unified API for managing, previewing, and exporting targeted 
- * context packs.
+ * context packs with professional-grade token metrics.
  */
 export function useTargetedPackManager(): TargetedPackHookResult {
   // 1. Central State (Zustand - Granular Selectors)
@@ -51,15 +52,14 @@ export function useTargetedPackManager(): TargetedPackHookResult {
   const targetedPathsInput = useSlicerStore(s => s.targetedPathsInput);
   const setTargetedPathsInput = useSlicerStore(s => s.setTargetedPathsInput);
   
-  // ALIAS RESOLUTION: We need the config to resolve monorepo paths
-  const slicerConfig = useSlicerStore(s => s.slicerConfig);
-  
   const { isStale } = useFreshnessStatus();
 
   // 2. Feature Hooks
   const { parsedTargets } = useTargetParsing(targetedPathsInput);
   const { preambleOnly, docblocksOnly, setPreambleOnly, setDocblocksOnly } = usePackOptions();
-  const { selectedCount, approxTokens } = usePackStats(fileIndex, parsedTargets);
+  
+  // STATS INTEGRATION: selectedCount, approxTokens (progressive), and isAccurate (Tiktoken flag)
+  const { selectedCount, approxTokens, isAccurate } = usePackStats(fileIndex, parsedTargets);
 
   // 3. Extraction Orchestration
   /**
@@ -73,8 +73,6 @@ export function useTargetedPackManager(): TargetedPackHookResult {
     const preFlightData = await runPreFlight(parsedTargets, fileIndex);
 
     // Step 2: Assemble Layered Pack (Phase 2)
-    // PLUMBING FIX: Pass the aliasMap (from config or harness defaults) 
-    // to support @prism/* resolution in the Boundary Library.
     return assembleContextPack(
       fileIndex, 
       parsedTargets, 
@@ -82,8 +80,7 @@ export function useTargetedPackManager(): TargetedPackHookResult {
       {
         docblocksOnly,
         includeBoundaryLibrary: true,
-        // In the test network context, these aliases allow the boundary scanner 
-        // to resolve imports between packages.
+        // Default alias map for standard resolution
         aliasMap: {
           '@prism/shared-types': 'packages/shared-types',
           '@prism/ui-kit': 'packages/ui-kit',
@@ -123,6 +120,7 @@ export function useTargetedPackManager(): TargetedPackHookResult {
     targetedPathsInput,
     selectedCount,
     approxTokens,
+    isAccurate,
     preambleOnly,
     docblocksOnly,
 

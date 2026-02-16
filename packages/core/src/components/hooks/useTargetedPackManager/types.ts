@@ -1,11 +1,11 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/types.ts
- * @stamp {"ts":"2026-02-15T11:00:00Z"}
+ * @stamp {"ts":"2026-02-16T14:10:00Z"}
  * @architectural-role Type Definition
  * @description
  * Internal type definitions for the Targeted Pack Manager subsystem. Defines the 
  * interfaces for targeting logic, pre-flight AST results, and the combined 
- * hook state.
+ * hook state. Updated to support token count accuracy metadata.
  * 
  * @core-principles
  * 1. IS the single source of truth for internal pack management schemas.
@@ -56,6 +56,8 @@ export interface PackManagerState {
   targetedPathsInput: string;
   selectedCount: number;
   approxTokens: string;
+  /** Whether the current approxTokens is a heuristic (false) or a Tiktoken count (true) */
+  isAccurate: boolean;
   preambleOnly: boolean;
   docblocksOnly: boolean;
 }

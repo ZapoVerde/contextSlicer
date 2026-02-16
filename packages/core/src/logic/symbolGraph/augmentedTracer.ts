@@ -1,24 +1,25 @@
 /**
  * @file packages/core/src/logic/symbolGraph/augmentedTracer.ts
- * @stamp {"ts":"2026-02-15T23:40:00Z"}
+ * @stamp {"ts":"2026-02-16T14:20:00Z"}
  * @architectural-role Business Logic
  * @description
  * The core logical tracing engine. Performs a BFS traversal of the symbol graph
  * using the Two-Part Pipe Detection Rule. Structural passthroughs (Pipes) cost 
  * 0 hops, while logic-bearing files cost 1 hop. Enforces a distance-based 
- * resolution gradient and provides detailed diagnostic logging.
+ * resolution gradient. Supports dependency injection for logging to enable batching.
  * 
  * @core-principles
  * 1. ENFORCES the Two-Part Pipe Rule: cost 0 only if (Re-exports AND No Activity).
  * 2. PRIORITIZES distance-based resolution: nearby logic files must be Full Code.
- * 3. PROVIDES observability through structured console telemetry.
+ * 3. SUPPORTS log aggregation via optional external LogBuffer injection.
  * 
  * @api-declaration
  *   export function traceLogicalPath(
  *     graph: SymbolGraph, 
  *     astCache: Map<string, Node>,
  *     startId: string, 
- *     options: TraceOptions
+ *     options: TraceOptions,
+ *     externalLogger?: LogBuffer
  *   ): TracedNode[];
  * 
  * @contract
@@ -28,9 +29,10 @@
  */
 
 import type { Node } from '@babel/types';
-import type { SymbolGraph, TraceOptions, TracedNode, SymbolNode, ResolutionLevel } from './types';
-import { hasReexports } from './analyzers/barrelDetector';
-import { hasLogicActivity } from './analyzers/flowAnalyzer';
+import type { SymbolGraph, TraceOptions, TracedNode, SymbolNode, ResolutionLevel } from './types.js';
+import { hasReexports } from './analyzers/barrelDetector.js';
+import { hasLogicActivity } from './analyzers/flowAnalyzer.js';
+import { LogBuffer } from './logUtils.js';
 
 const PHYSICAL_LIMIT = 150; // Safety boundary for deep physical chains
 
@@ -43,16 +45,25 @@ interface QueueItem {
 /**
  * @id packages/core/src/logic/symbolGraph/augmentedTracer.ts#traceLogicalPath
  * @description
- * Traces the dependency graph using the structural Pipe Detection Rule with diagnostic logging.
+ * Traces the dependency graph using the structural Pipe Detection Rule.
+ * accepts an optional `externalLogger` to allow batch-processing of multiple traces
+ * without spamming the console with individual flushes.
  */
 export function traceLogicalPath(
   graph: SymbolGraph,
   astCache: Map<string, Node>,
   startId: string,
-  options: TraceOptions
+  options: TraceOptions,
+  externalLogger?: LogBuffer
 ): TracedNode[] {
-  console.groupCollapsed(`[Tracer] Starting trace from ${startId}`);
-  console.log('Options:', options);
+  // Use external logger if provided, otherwise create a local one (auto-flush mode)
+  const logger = externalLogger || new LogBuffer('Tracer');
+  const isBatchMode = !!externalLogger;
+
+  logger.push(`Starting trace from: ${startId}`);
+  if (!isBatchMode) {
+    logger.push(`Config: MaxHops=${options.maxHops}, SummaryHops=${options.summaryHops}, Direction=${options.direction}`);
+  }
 
   const startNodes = new Set<SymbolNode>();
   const totalMaxHops = Math.max(options.maxHops, options.summaryHops);
@@ -72,8 +83,8 @@ export function traceLogicalPath(
   }
 
   if (startNodes.size === 0) {
-    console.warn('[Tracer] No start nodes found.');
-    console.groupEnd();
+    logger.push(`[Warning] No start nodes found for ID: ${startId}`);
+    if (!isBatchMode) logger.flush();
     return [];
   }
 
@@ -97,7 +108,8 @@ export function traceLogicalPath(
       scent: '',
       depth: 0
     });
-    console.log(`[Seed] ${n.filePath}`);
+    // In batch mode, we skip logging every seed to reduce noise
+    if (!isBatchMode) logger.push(`[Seed] ${n.filePath}`);
   });
 
   let head = 0;
@@ -133,7 +145,6 @@ export function traceLogicalPath(
       
       const isPipe = reexports && !activity;
       const isLogic = !isPipe;
-      const debugReason = isPipe ? 'Pure Pipe (Re-export only)' : 'Logic/Activity Detected';
       
       // Cost 0 for Pipes (Wormholes), Cost 1 for Logic (Functional Files)
       const cost = isPipe ? 0 : 1;
@@ -145,7 +156,6 @@ export function traceLogicalPath(
       }
 
       // 5. Resolution Assignment (Distance-First Gradient)
-      // Passive pipes are ALWAYS summarized unless they were seed files.
       let resolution: ResolutionLevel = 'summary';
 
       if (isLogic && nextLogicalHops <= options.maxHops) {
@@ -171,9 +181,12 @@ export function traceLogicalPath(
           depth: nextLogicalHops
         });
 
-        console.log(
-          `[Add] ${neighborPath} | Depth: ${nextLogicalHops} | Type: ${resolution} | Reason: ${debugReason}`
-        );
+        // Only log logic nodes or resolution upgrades to keep batch logs clean
+        if (isLogic || isResolutionUpgrade) {
+           logger.push(
+            `[Add] ${neighborPath} | Hops: ${nextLogicalHops} | Res: ${resolution} | Type: ${isLogic ? 'LOGIC' : 'PIPE'}`
+          );
+        }
 
         queue.push({
           node: neighborNode,
@@ -184,8 +197,12 @@ export function traceLogicalPath(
     }
   }
 
-  console.log(`[Tracer] Trace complete. Found ${results.size} unique files.`);
-  console.groupEnd();
+  // Only flush if we created the logger locally (Single Mode)
+  // In Batch Mode, the parent will flush
+  if (!isBatchMode) {
+    logger.push(`Trace complete. Found ${results.size} unique files.`);
+    logger.flush();
+  }
 
   return Array.from(results.values());
 }

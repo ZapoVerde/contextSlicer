@@ -1,17 +1,16 @@
 /**
  * @file packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts
- * @stamp {"ts":"2026-02-15T22:05:00Z"}
+ * @stamp {"ts":"2026-02-16T14:35:00Z"}
  * @architectural-role Business Logic
  * @description
  * A pure service that calculates the final set of file paths for a context pack.
- * Encapsulates the logic for seed collection, dual-resolution graph traversal, 
- * and resolution reconciliation. It enforces a "Highest Resolution Wins" policy 
- * for output generation while detecting and warning about internal conflicts.
+ * Optimized with a shared LogBuffer to aggregate discovery telemetry from 
+ * documentation folders, wildcards, and dependency traces into a single flush.
  *
  * @core-principles
  * 1. IS a framework-agnostic logic engine for file discovery.
  * 2. MUST reconcile conflicting resolution instructions (Full > Summary).
- * 3. OWNS the coordination of tracing modes and exclusion rules.
+ * 3. OPTIMIZES diagnostic observability via batch-buffered logging.
  *
  * @api-declaration
  *   export async function discoverContextPaths(
@@ -33,55 +32,55 @@ import { wildcardToRegExp } from '../../../logic/wildcardUtils';
 import { getFilesForCheckedFolders } from '../../../logic/docsFolderLogic';
 import { traceLogicalPath } from '../../../logic/symbolGraph/augmentedTracer';
 import { buildTemporaryAstCache } from './astUtils';
+import { LogBuffer } from '../../../logic/symbolGraph/logUtils';
 import type { QueryPanelState } from './types';
 
 /**
  * @id packages/core/src/components/hooks/useQueryPanelState/queryDiscoveryService.ts#discoverContextPaths
  * @description
- * Executes the full discovery pipeline: Seed Collection -> Dual-Resolution Trace -> 
- * Reconciliation & Sieve. Identifies resolution conflicts between seeds and traces, 
- * and collapses them into the highest priority instruction.
+ * Executes the full discovery pipeline with consolidated batch logging.
  */
 export async function discoverContextPaths(
   fileIndex: Map<string, FileEntry>,
   symbolGraph: SymbolGraph | null,
   state: QueryPanelState
 ): Promise<{ paths: string[]; traceWarning: string; resolutionWarnings: string[] }> {
+  const logger = new LogBuffer('DiscoveryService');
   const allFilePaths = Array.from(fileIndex.keys());
   let traceWarning = '';
 
   /**
    * identityMap: Tracks all requested resolutions for a physical path.
    * Key: "src/file.ts" (Raw Physical Path)
-   * Value: Set of requested resolutions {'full', 'summary'}
    */
   const identityMap = new Map<string, Set<ResolutionLevel>>();
 
   const addRequest = (path: string, resolution: ResolutionLevel) => {
-    // Ensure we are working with the clean physical path
     const rawPath = path.split(':')[0]; 
     const resolutionSet = identityMap.get(rawPath) ?? new Set<ResolutionLevel>();
     resolutionSet.add(resolution);
     identityMap.set(rawPath, resolutionSet);
   };
 
-  // We explicitly track "Seeds" separately. 
-  // Seeds are the entry points for the trace.
   const seedPaths = new Set<string>();
 
-  // 1. Gather Seeds: Docs Folders (Defaults to Full Extraction)
+  // 1. Gather Seeds: Docs Folders
   const docFiles = getFilesForCheckedFolders(fileIndex, state.checkedDocsFolders);
-  docFiles.forEach(path => {
-    addRequest(path, 'full');
-    seedPaths.add(path);
-  });
+  if (docFiles.length > 0) {
+    logger.push(`[Seeds] Added ${docFiles.length} files from docs folders.`);
+    docFiles.forEach(path => {
+      addRequest(path, 'full');
+      seedPaths.add(path);
+    });
+  }
 
-  // 2. Gather Seeds: Wildcards (Defaults to Full Extraction)
+  // 2. Gather Seeds: Wildcards
   if (state.wildcardQuery.trim()) {
     const patterns = state.wildcardQuery.split(',').map(p => p.trim()).filter(Boolean);
     for (const pattern of patterns) {
       const regex = wildcardToRegExp(pattern);
       const matches = allFilePaths.filter(p => regex.test(p));
+      logger.push(`[Seeds] Wildcard '${pattern}' matched ${matches.length} files.`);
       matches.forEach(m => {
         addRequest(m, 'full');
         seedPaths.add(m);
@@ -92,6 +91,7 @@ export async function discoverContextPaths(
   // 3. Gather Seeds: Trace Start
   if (state.traceQuery) {
     const startPath = state.traceQuery.split('#')[0];
+    logger.push(`[Seeds] Trace entry point: ${startPath}`);
     addRequest(startPath, 'full');
     seedPaths.add(startPath);
   }
@@ -105,21 +105,22 @@ export async function discoverContextPaths(
         const graphFiles = Array.from(symbolGraph.values()).map(n => n.filePath);
         const astCache = await buildTemporaryAstCache(fileIndex, graphFiles);
 
+        logger.push(`[Trace] Starting logical trace for ${seedPaths.size} seeds...`);
         for (const startPath of Array.from(seedPaths)) {
+          // Pass the shared logger to augmentedTracer to aggregate logs
           const tracedNodes = traceLogicalPath(symbolGraph, astCache, startPath, {
             mode: 'logical',
             direction: state.traceDirection,
             maxHops: state.traceDepth,
             summaryHops: state.summaryTraceDepth,
-          });
+          }, logger);
 
           tracedNodes.forEach(node => {
-            // Add discovered node resolution to the map
             addRequest(node.path, node.resolution);
           });
         }
       } else {
-        // Physical tracing fallback (Legacy support)
+        logger.push(`[Trace] Starting physical fallback trace...`);
         for (const startPath of Array.from(seedPaths)) {
           const tracedPaths = traceSymbolGraph(symbolGraph, startPath, state.traceDirection, state.traceDepth);
           tracedPaths.forEach(p => addRequest(p, 'full'));
@@ -127,6 +128,7 @@ export async function discoverContextPaths(
       }
     } else {
       traceWarning = ' (Tracing skipped: Graph unavailable)';
+      logger.push('[Warning] Symbol graph unavailable. Tracing skipped.');
     }
   }
 
@@ -135,14 +137,12 @@ export async function discoverContextPaths(
   const finalInstructions: string[] = [];
 
   identityMap.forEach((resolutions, rawPath) => {
-    // A. Detect Conflicts (Seed vs Trace or Depth Overlap)
     if (resolutions.has('full') && resolutions.has('summary')) {
       resolutionWarnings.push(
         `Conflict: '${rawPath}' targeted as both Full and Summary. Defaulting to Full.`
       );
     }
 
-    // B. Generate Output (Highest Resolution Wins: Full > Summary)
     if (resolutions.has('full')) {
       finalInstructions.push(rawPath);
     } else if (resolutions.has('summary')) {
@@ -158,9 +158,16 @@ export async function discoverContextPaths(
     
     filteredInstructions = finalInstructions.filter(instruction => {
       const rawPath = instruction.split(':')[0];
-      return !exclusionRegexes.some(regex => regex.test(rawPath));
+      const isExcluded = exclusionRegexes.some(regex => regex.test(rawPath));
+      if (isExcluded) {
+        logger.push(`[Sieve] Excluded: ${rawPath}`);
+      }
+      return !isExcluded;
     });
   }
+
+  logger.push(`Discovery complete. Instructions generated for ${filteredInstructions.length} files.`);
+  logger.flush();
 
   return {
     paths: filteredInstructions,
