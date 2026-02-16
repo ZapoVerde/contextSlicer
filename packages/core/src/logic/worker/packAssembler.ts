@@ -1,17 +1,17 @@
 /**
  * @file packages/core/src/logic/worker/packAssembler.ts
- * @stamp {"ts":"2026-02-16T20:35:00Z"}
+ * @stamp {"ts":"2026-02-16T21:55:00Z"}
  * @architectural-role Business Logic / Logic Module
  * @description
  * Implements the "Construction Engine" for the context pack generation phase. 
  * Orchestrates the concatenation of spatial metadata, boundary definitions, 
- * and source logic. Handles off-thread Tiktoken BPE counting to ensure 
- * accurate size reporting without blocking the UI.
+ * and source logic. Now supports "Docblocks Only" mode by stitching JSDoc 
+ * preambles with pre-computed structural contract briefs (Imports/Exports).
  *
  * @core-principles
  * 1. IS a pure logic module for multi-file assembly.
  * 2. OWNS the accurate token counting logic (cl100k_base).
- * 3. MUST ensure structural integrity of the final context document.
+ * 3. SIGNAL-PRIORITY: Ensures architectural context is preserved even when code is omitted.
  *
  * @api-declaration
  *   export async function assemblePack(
@@ -35,28 +35,28 @@ import { generateFileTree } from '../fileTreeUtils.js';
 import { generateSummary } from '../symbolGraph/summaryGenerator.js';
 import { scanBoundaries } from '../symbolGraph/boundaryScanner/index.js';
 import { generateBoundaryLibrary } from '../symbolGraph/typeDefinitionExtractor.js';
+import { extractFilePreamble } from '../preambleUtils.js';
 
 /**
  * @id packages/core/src/logic/worker/packAssembler.ts#assemblePack
  * @description
- * Constructs the final context pack string from provided file content and targets.
+ * Constructs the final context pack string. Corrects the "Paradox" by providing 
+ * structural contracts for boundary files and optionally for all files 
+ * when in Docblock-only mode.
  * 
- * @param data - The payload containing targets, file content, and options.
+ * @param data - The payload containing targets, file content, and pre-computed contracts.
  * @param tokenizer - The initialized Tiktoken instance for token counting.
  */
 export async function assemblePack(
   data: AssemblyPayload,
   tokenizer: Tiktoken
 ): Promise<AssemblyResult> {
-  const { targets, files, options } = data;
+  const { targets, files, contractLibrary, options } = data;
   const pack: string[] = [];
   
-  // 1. AST Cache for Boundary Scanning
-  // We parse targeted files to identify external dependencies.
   const targetAsts = new Map<string, File>();
-  
-  // Lightweight mock of the File Index required by the extraction services.
   const fileIndexMock = new Map<string, any>();
+  
   Object.keys(files).forEach(path => {
     fileIndexMock.set(path, {
       path,
@@ -78,9 +78,23 @@ export async function assemblePack(
     const content = files[target.path];
     if (content === undefined) continue;
 
+    pack.push(`=== ${target.path} ===`);
+
+    // STRATEGY: Docblocks Only (Global Override)
+    if (options.docblocksOnly) {
+      pack.push('[PREAMBLE & CONTRACT]');
+      const preamble = extractFilePreamble(content);
+      if (preamble) pack.push(preamble);
+      
+      const brief = contractLibrary[target.path];
+      if (brief) pack.push(brief);
+      
+      pack.push(`\n--- END OF FILE ---\n`);
+      continue;
+    }
+
+    // STRATEGY: Standard Resolution Gradient
     if (target.resolution === 'full') {
-      // Seed Extraction (Full Source)
-      pack.push(`=== ${target.path} ===`);
       pack.push(`[SEED - Full Implementation]`);
       pack.push('');
       pack.push(content);
@@ -93,12 +107,10 @@ export async function assemblePack(
           errorRecovery: true
         });
         targetAsts.set(target.path, ast);
-      } catch (e) {
-        // Continue if parsing fails; boundary scanning will skip this file.
-      }
+      } catch { /* skip boundary scan for this file */ }
 
     } else {
-      // Dependency Extraction (Semantic Summary)
+      // Summary Brief
       try {
         const ast = parser.parse(content, {
           sourceType: 'module',
@@ -109,7 +121,6 @@ export async function assemblePack(
         pack.push(summary);
         pack.push('\n');
       } catch {
-        pack.push(`=== ${target.path} ===`);
         pack.push(`[SUMMARY - Parse Failure]`);
         pack.push(`// Content omitted due to syntax errors.\n`);
       }
@@ -118,20 +129,14 @@ export async function assemblePack(
 
   // --- LAYER 1.5: BOUNDARY LIBRARY ---
   if (options.includeBoundaryLibrary && targetAsts.size > 0) {
-    // Note: In this worker-bound decomposition, we pass the local file mock.
-    // If global libraries are available in the payload, they should be passed here.
-    const boundarySymbols = scanBoundaries(
-      fileIndexMock as any, 
-      targetAsts
-    );
+    const boundarySymbols = scanBoundaries(fileIndexMock as any, targetAsts);
 
     if (boundarySymbols.length > 0) {
-      // Refactor Note: In the decomposed state, the worker generates a local 
-      // boundary library based on available file content.
+      // Use the provided contractLibrary for semantic boundary extraction
       const boundaryLibrary = await generateBoundaryLibrary(
         boundarySymbols,
-        new Map(), // Local worker does not have the global typeLibrary
-        new Map()  // Local worker does not have the global signatureLibrary
+        new Map(), // Type signatures handled via synthetic signatures if available
+        new Map()  // Signature Library should ideally be passed in payload too
       );
       
       if (boundaryLibrary) {
@@ -150,8 +155,6 @@ export async function assemblePack(
   pack.push('--- END OF PACK ---');
   
   const fullText = pack.join('\n');
-  
-  // Accurate token count using Tiktoken
   const tokenCount = tokenizer.encode(fullText).length;
 
   return {

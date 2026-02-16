@@ -1,12 +1,12 @@
 /**
  * @file packages/core/test/harness/network-harness.ts
- * @stamp {"ts":"2026-02-16T21:10:00Z"}
+ * @stamp {"ts":"2026-02-16T22:50:00Z"}
  * @architectural-role Utility / Test Infrastructure
  * @description
  * The authoritative test harness for the Hardened Prism Network. Updated to 
- * support the Pre-Computed Type Closure architecture. The MockWorkerPool 
- * now simulates the semantic mining phase, extracting type registries and 
- * synthetic signatures from the test network files.
+ * support structural Contract Briefs. The MockWorkerPool now simulates the 
+ * AST-driven extraction of import and export names, populating the global 
+ * contract library for integration testing.
  * 
  * @core-principles
  * 1. TESTABILITY: MUST provide a synchronous simulation of worker threads.
@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import traverse from '@babel/traverse';
+import type { Identifier } from '@babel/types';
 import { buildSymbolGraph } from '../../src/logic/symbolGraph/index.js';
 import { discoverSymbolsInAst } from '../../src/logic/symbolGraph/passes/2_discoverSymbols.js';
 import { parseSourceToAst } from '../../src/logic/symbolGraph/passes/1_buildAstCache.js';
@@ -33,6 +34,25 @@ import type { WorkerResult, TaskType } from '../../src/logic/worker/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/**
+ * Formats captured import and export data into a clean text block.
+ * Mirrors the logic in production fileAnalyzer.ts.
+ */
+function formatContractBrief(importMap: Map<string, string[]>, exports: string[]): string {
+  const lines: string[] = ['\n--- STRUCTURAL CONTRACT ---'];
+  if (importMap.size > 0) {
+    lines.push('IMPORTS:');
+    importMap.forEach((names, source) => {
+      lines.push(`  - { ${names.join(', ')} } from '${source}'`);
+    });
+  }
+  if (exports.length > 0) {
+    lines.push('EXPORTS:');
+    exports.forEach(exp => lines.push(`  - ${exp}`));
+  }
+  return lines.join('\n');
+}
 
 /**
  * A specialized simulation of the WorkerPool for Node.js testing.
@@ -56,48 +76,59 @@ class MockWorkerPool {
         const imports: string[] = [];
         const typeRegistry: Record<string, string> = {};
         const syntheticSignatures: Record<string, string> = {};
+        
+        const importSummary = new Map<string, string[]>();
+        const exportSummary: string[] = [];
 
         traverse(ast, {
           ImportDeclaration(p) {
-            imports.push(p.node.source.value);
+            const source = p.node.source.value;
+            imports.push(source);
+            const names = p.node.specifiers.map(spec => {
+              if (spec.type === 'ImportSpecifier') return (spec.imported as Identifier).name;
+              return spec.type === 'ImportDefaultSpecifier' ? 'default' : '*';
+            });
+            importSummary.set(source, [...(importSummary.get(source) || []), ...names]);
           },
           ExportNamedDeclaration(p) {
-            if (p.node.source) imports.push(p.node.source.value);
+            if (p.node.source) {
+              imports.push(p.node.source.value);
+              const names = p.node.specifiers.map(s => (s.exported as Identifier).name);
+              importSummary.set(p.node.source.value, [...(importSummary.get(p.node.source.value) || []), ...names]);
+            }
             
             const decl = p.node.declaration;
-            if (!decl) return;
-
-            // Extract Type Registry
-            if (
-              decl.type === 'TSInterfaceDeclaration' ||
-              decl.type === 'TSTypeAliasDeclaration' ||
-              decl.type === 'TSEnumDeclaration'
-            ) {
-              if (decl.id?.type === 'Identifier') {
-                const name = decl.id.name;
-                if (decl.start !== null && decl.end !== null) {
-                  typeRegistry[name] = payload.content.slice(decl.start, decl.end);
-                }
-              }
-            }
-            // Generate Synthetic Signatures for Values
-            else if (decl.type === 'VariableDeclaration') {
-              decl.declarations.forEach((d) => {
-                if (d.id.type === 'Identifier') {
-                  const name = d.id.name;
-                  syntheticSignatures[name] = `export declare const ${name}: any;`;
-                }
+            if (!decl) {
+              p.node.specifiers.forEach(s => {
+                const name = (s.exported as Identifier).name;
+                exportSummary.push(name);
               });
+              return;
             }
-            else if (decl.type === 'FunctionDeclaration') {
-              if (decl.id?.type === 'Identifier') {
-                const name = decl.id.name;
-                syntheticSignatures[name] = `export declare function ${name}(...args: any[]): any;`;
+
+            if (['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration'].includes(decl.type)) {
+              const name = (decl as any).id.name;
+              exportSummary.push(`${name} (Type)`);
+              if (decl.start !== null && decl.end !== null) {
+                typeRegistry[name] = payload.content.slice(decl.start, decl.end);
               }
+            } else if (decl.type === 'VariableDeclaration') {
+              decl.declarations.forEach(d => {
+                const name = (d.id as Identifier).name;
+                exportSummary.push(`${name} (Variable)`);
+                syntheticSignatures[name] = `export declare const ${name}: any;`;
+              });
+            } else if (decl.type === 'FunctionDeclaration' && decl.id) {
+              exportSummary.push(`${decl.id.name} (Function)`);
+              syntheticSignatures[decl.id.name] = `export declare function ${decl.id.name}(...args: any[]): any;`;
             }
+          },
+          ExportDefaultDeclaration() {
+            exportSummary.push('default');
           },
           ExportAllDeclaration(p) {
             imports.push(p.node.source.value);
+            importSummary.set(p.node.source.value, [...(importSummary.get(p.node.source.value) || []), '*']);
           }
         });
 
@@ -111,14 +142,12 @@ class MockWorkerPool {
             hasLogicActivity: hasLogicActivity(ast),
             isBarrel: isBarrelFile(ast),
             typeRegistry,
-            syntheticSignatures
+            syntheticSignatures,
+            contractBrief: formatContractBrief(importSummary, exportSummary)
           },
         };
       } catch (e) {
-        return {
-          taskId: 'mock-task',
-          error: e instanceof Error ? e.message : 'Mock Analysis Failed',
-        };
+        return { taskId: 'mock-task', error: e instanceof Error ? e.message : 'Mock Analysis Failed' };
       }
     }
     return { taskId: 'mock-task' };
@@ -126,16 +155,14 @@ class MockWorkerPool {
 }
 
 /**
- * @id packages/core/test/harness/network-harness.ts#NetworkHarness
- * @description
- * Coordinates the loading of the test network into memory and the 
- * initialization of core architectural logic.
+ * Coordinates the loading of the test network into memory.
  */
 export class NetworkHarness {
   private readonly fileIndex: Map<string, FileEntry> = new Map();
   private symbolGraph: SymbolGraph | null = null;
   private typeLib: Map<string, Record<string, string>> = new Map();
   private signLib: Map<string, Record<string, string>> = new Map();
+  private contractLib: Map<string, string> = new Map();
   private readonly networkPath: string;
 
   private constructor() {
@@ -155,18 +182,16 @@ export class NetworkHarness {
       for (const file of files) {
         const fullPath = path.join(dir, file);
         const relPath = path.relative(this.networkPath, fullPath).replace(/\\/g, '/');
-        
         if (fs.statSync(fullPath).isDirectory()) {
           walk(fullPath);
         } else {
           const content = fs.readFileSync(fullPath);
-          const entry: FileEntry = {
+          this.fileIndex.set(relPath, {
             path: relPath,
             size: content.length,
             getText: async () => content.toString('utf-8'),
             getUint8: async () => new Uint8Array(content),
-          };
-          this.fileIndex.set(relPath, entry);
+          });
         }
       }
     };
@@ -175,32 +200,25 @@ export class NetworkHarness {
   }
 
   private async buildGraph(): Promise<void> {
-    const errors: string[] = [];
-    const aliasMap = {
-      '@prism/shared-types': 'packages/shared-types',
-      '@prism/ui-kit': 'packages/ui-kit',
-      '@prism/web': 'packages/web'
-    };
-
     const mockPool = new MockWorkerPool() as unknown as WorkerPool;
-    
-    // Manual pass to build registries since buildSymbolGraph only returns the graph
     for (const file of this.fileIndex.values()) {
       if (!/\.(ts|tsx|js|jsx)$/.test(file.path)) continue;
       const res = await mockPool.execute('ANALYZE_FILE', { path: file.path, content: await file.getText() });
       if (res.payload) {
         this.typeLib.set(file.path, res.payload.typeRegistry);
         this.signLib.set(file.path, res.payload.syntheticSignatures);
+        this.contractLib.set(file.path, res.payload.contractBrief);
       }
     }
-
-    this.symbolGraph = await buildSymbolGraph(this.fileIndex, aliasMap, errors, mockPool);
+    const errors: string[] = [];
+    this.symbolGraph = await buildSymbolGraph(this.fileIndex, {}, errors, mockPool);
   }
 
   public getFileIndex(): Map<string, FileEntry> { return this.fileIndex; }
   public getSymbolGraph(): SymbolGraph { return this.symbolGraph!; }
   public getTypeLib() { return this.typeLib; }
   public getSignLib() { return this.signLib; }
+  public getContractLib() { return this.contractLib; }
 
   public getAst(filePath: string): any {
     const entry = this.fileIndex.get(filePath);

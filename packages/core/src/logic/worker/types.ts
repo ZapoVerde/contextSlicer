@@ -1,12 +1,12 @@
 /**
  * @file packages/core/src/logic/worker/types.ts
- * @stamp {"ts":"2026-02-16T18:15:00Z"}
+ * @stamp {"ts":"2026-02-16T18:30:00Z"}
  * @architectural-role Type Definition
  * @description
  * Defines the messaging protocol and data structures for background workers. 
  * Facilitates the transfer of distilled architectural metadata, including 
- * pre-computed type closures and synthetic signatures, from workers to 
- * the main thread's global registry.
+ * pre-computed type closures, synthetic signatures, and structural contract 
+ * briefs for dependency mapping.
  *
  * @core-principles
  * 1. IS the single source of truth for the Worker messaging protocol.
@@ -59,6 +59,11 @@ export interface DistilledMetadata {
    * Key: Symbol Name. Value: A synthetic 'export declare' string.
    */
   syntheticSignatures: Record<string, string>;
+  /**
+   * NEW: A human-readable summary of the file's imports and exports.
+   * Used for "Docblocks Only" mode to provide a dependency map.
+   */
+  contractBrief: string;
 }
 
 /**
@@ -69,6 +74,11 @@ export interface AssemblyPayload {
   targets: Array<{ path: string; resolution: 'full' | 'summary' }>;
   /** Plain object mapping file paths to their raw text content */
   files: Record<string, string>;
+  /** 
+   * NEW: Pre-computed contract briefs for high-speed assembly in Docblock mode.
+   * Key: FilePath. Value: ContractBrief string.
+   */
+  contractLibrary: Record<string, string>;
   /** Options for output formatting */
   options: {
     docblocksOnly: boolean;
