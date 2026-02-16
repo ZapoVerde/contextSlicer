@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/worker/packAssembler.ts
- * @stamp {"ts":"2026-02-16T22:55:00Z"}
+ * @stamp {"ts":"2026-02-16T23:35:00Z"}
  * @architectural-role Business Logic / Orchestrator
  * @description
  * Implements the "Construction Engine" for the context pack generation phase 
@@ -64,7 +64,9 @@ export async function assemblePack(
   const pack: string[] = [];
   const targetAsts = new Map<string, File>();
   
-  // Create a minimal FileIndex adapter for scanBoundaries compatibility
+  // Create a minimal FileIndex adapter for scanBoundaries compatibility.
+  // The boundary scanner needs to know which files EXIST in the project to 
+  // correctly resolve imports, even if we aren't including their content.
   const fileIndexMock = new Map<string, any>();
   Object.keys(files).forEach(path => {
     fileIndexMock.set(path, {
@@ -109,6 +111,7 @@ export async function assemblePack(
       pack.push(content);
       pack.push(`\n--- END OF FILE ---\n`);
 
+      // We parse ASTs for Full files to detect their boundary crossings later
       try {
         const ast = parser.parse(content, {
           sourceType: 'module',
@@ -137,11 +140,13 @@ export async function assemblePack(
   }
 
   // --- LAYER 1.5: BOUNDARY LIBRARY ---
+  // If requested, we identify symbols imported by the pack that live outside it.
   if (options.includeBoundaryLibrary && targetAsts.size > 0) {
     const boundarySymbols = scanBoundaries(fileIndexMock as any, targetAsts);
 
     if (boundarySymbols.length > 0) {
-      // Deserialize the libraries into Map structures expected by generateBoundaryLibrary
+      // Deserialize the libraries into Map structures expected by generateBoundaryLibrary.
+      // The payload passes them as Record<string, ...> for serialization.
       const typeLibMap = new Map<string, Record<string, string>>();
       Object.entries(typeLibrary).forEach(([path, data]) => {
         typeLibMap.set(path, data);
@@ -152,6 +157,7 @@ export async function assemblePack(
         signLibMap.set(path, data);
       });
 
+      // Generate the distilled contracts using the Local Chaser logic
       const boundaryLibrary = await generateBoundaryLibrary(
         boundarySymbols,
         typeLibMap,
@@ -159,6 +165,7 @@ export async function assemblePack(
       );
       
       if (boundaryLibrary) {
+        // Inject Layer 1.5 before Layer 2
         const markerIndex = pack.indexOf(sourceLogicMarker);
         if (markerIndex !== -1) {
           pack.splice(markerIndex, 0, 

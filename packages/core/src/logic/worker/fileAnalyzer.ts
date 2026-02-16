@@ -1,12 +1,11 @@
 /**
  * @file packages/core/src/logic/worker/fileAnalyzer.ts
- * @stamp {"ts":"2026-02-16T18:40:00Z"}
+ * @stamp {"ts":"2026-02-16T23:55:00Z"}
  * @architectural-role Business Logic / Logic Module
  * @description
  * Implements the "Semantic Miner" logic for the indexing phase. Parses source 
  * code into an AST to extract dependency edges, architectural flags, and 
- * distilled semantic contracts. Now includes a "Contract Brief" generator 
- * that summarizes public surface area and dependencies for LLM context.
+ * distilled semantic contracts. 
  *
  * @core-principles
  * 1. IS a pure logic module for single-file analysis.
@@ -24,7 +23,14 @@
 
 import * as parser from '@babel/parser';
 import traverse from '@babel/traverse';
-import type { VariableDeclaration, FunctionDeclaration, Identifier } from '@babel/types';
+import type { 
+  VariableDeclaration, 
+  FunctionDeclaration, 
+  Identifier,
+  TSInterfaceDeclaration,
+  TSTypeAliasDeclaration,
+  TSEnumDeclaration
+} from '@babel/types';
 import type { DistilledMetadata } from './types.js';
 import { hasReexports, isBarrelFile } from '../symbolGraph/analyzers/barrelDetector.js';
 import { hasLogicActivity } from '../symbolGraph/analyzers/flowAnalyzer.js';
@@ -49,20 +55,44 @@ export function analyzeFile(path: string, content: string): DistilledMetadata {
   const logic = hasLogicActivity(ast);
   const barrel = isBarrelFile(ast);
 
-  const symbols: string[] = [];
-  const imports: string[] = [];
+  const symbols = new Set<string>();
+  const imports = new Set<string>();
   
   const typeRegistry: Record<string, string> = {};
   const syntheticSignatures: Record<string, string> = {};
 
-  // Structures for the Contract Brief
   const importSummary = new Map<string, string[]>();
   const exportSummary: string[] = [];
+
+  /**
+   * Helper to handle type definitions (Interface, Alias, Enum).
+   * It indexes EVERYTHING for the Chaser, but only adds to the 
+   * public symbols list if the declaration is exported.
+   */
+  const processTypeNode = (
+    node: TSInterfaceDeclaration | TSTypeAliasDeclaration | TSEnumDeclaration,
+    isExported: boolean
+  ) => {
+    if (node.id?.type === 'Identifier') {
+      const name = node.id.name;
+      
+      // 1. Always index for the "Local Chaser" (even if private)
+      if (node.start !== null && node.end !== null) {
+        typeRegistry[name] = content.slice(node.start, node.end);
+      }
+
+      // 2. Only add to public API if exported
+      if (isExported) {
+        symbols.add(name);
+        exportSummary.push(`${name} (Type)`);
+      }
+    }
+  };
 
   traverse(ast, {
     ImportDeclaration(p) {
       const source = p.node.source.value;
-      imports.push(source);
+      imports.add(source);
 
       const names: string[] = p.node.specifiers.map(spec => {
         if (spec.type === 'ImportSpecifier') {
@@ -81,10 +111,20 @@ export function analyzeFile(path: string, content: string): DistilledMetadata {
       importSummary.set(source, [...existing, ...names]);
     },
 
+    // OMNISCIENT MINING: Capture all top-level types regardless of export status
+    TSInterfaceDeclaration(p) {
+      processTypeNode(p.node, p.parent.type === 'ExportNamedDeclaration');
+    },
+    TSTypeAliasDeclaration(p) {
+      processTypeNode(p.node, p.parent.type === 'ExportNamedDeclaration');
+    },
+    TSEnumDeclaration(p) {
+      processTypeNode(p.node, p.parent.type === 'ExportNamedDeclaration');
+    },
+
     ExportNamedDeclaration(p) {
       if (p.node.source) {
-        imports.push(p.node.source.value);
-        // Track re-exports in the import summary for dependency mapping
+        imports.add(p.node.source.value);
         const source = p.node.source.value;
         const names = p.node.specifiers.map(s => (s.exported as Identifier).name);
         const existing = importSummary.get(source) || [];
@@ -96,36 +136,22 @@ export function analyzeFile(path: string, content: string): DistilledMetadata {
         p.node.specifiers.forEach((spec) => {
           if (spec.exported.type === 'Identifier') {
             const name = spec.exported.name;
-            symbols.push(name);
+            symbols.add(name);
             exportSummary.push(name);
           }
         });
         return;
       }
 
-      // --- 1. TYPE DEFINITIONS (Source Clipping) ---
-      if (
-        decl.type === 'TSInterfaceDeclaration' ||
-        decl.type === 'TSTypeAliasDeclaration' ||
-        decl.type === 'TSEnumDeclaration'
-      ) {
-        if (decl.id?.type === 'Identifier') {
-          const name = decl.id.name;
-          symbols.push(name);
-          exportSummary.push(`${name} (Type)`);
-          if (decl.start !== null && decl.end !== null) {
-            typeRegistry[name] = content.slice(decl.start, decl.end);
-          }
-        }
-      }
-      
-      // --- 2. VALUE DEFINITIONS (Signature Virtualization) ---
-      else if (decl.type === 'VariableDeclaration') {
+      // Note: Types are now handled by the specific visitors above to ensure 
+      // private types are also captured in the registry.
+
+      if (decl.type === 'VariableDeclaration') {
         const varDecl = decl as VariableDeclaration;
         varDecl.declarations.forEach((d) => {
           if (d.id.type === 'Identifier') {
             const name = d.id.name;
-            symbols.push(name);
+            symbols.add(name);
             exportSummary.push(`${name} (Variable)`);
             
             let signature = `export declare const ${name}`;
@@ -143,7 +169,7 @@ export function analyzeFile(path: string, content: string): DistilledMetadata {
         const funcDecl = decl as FunctionDeclaration;
         if (funcDecl.id?.type === 'Identifier') {
           const name = funcDecl.id.name;
-          symbols.push(name);
+          symbols.add(name);
           exportSummary.push(`${name} (Function)`);
           
           let signature = `export declare function ${name}`;
@@ -174,7 +200,7 @@ export function analyzeFile(path: string, content: string): DistilledMetadata {
       else if (decl.type === 'ClassDeclaration') {
         if (decl.id?.type === 'Identifier') {
            const name = decl.id.name;
-           symbols.push(name);
+           symbols.add(name);
            exportSummary.push(`${name} (Class)`);
            syntheticSignatures[name] = `export declare class ${name} { /* implementation omitted */ }`;
         }
@@ -182,12 +208,12 @@ export function analyzeFile(path: string, content: string): DistilledMetadata {
     },
 
     ExportDefaultDeclaration() {
-      symbols.push('default');
+      symbols.add('default');
       exportSummary.push('default');
     },
 
     ExportAllDeclaration(p) {
-      imports.push(p.node.source.value);
+      imports.add(p.node.source.value);
       const source = p.node.source.value;
       const existing = importSummary.get(source) || [];
       importSummary.set(source, [...existing, '* (Wildcard Re-export)']);
@@ -196,8 +222,8 @@ export function analyzeFile(path: string, content: string): DistilledMetadata {
 
   return {
     filePath: path,
-    symbols: Array.from(new Set(symbols)),
-    imports: Array.from(new Set(imports)),
+    symbols: Array.from(symbols),
+    imports: Array.from(imports),
     hasReexports: reexports,
     hasLogicActivity: logic,
     isBarrel: barrel,

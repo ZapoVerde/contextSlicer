@@ -1,11 +1,11 @@
 /**
  * @file packages/core/test/specs/04-boundary-detection.spec.ts
- * @stamp {"ts":"2026-02-16T21:30:00Z"}
+ * @stamp {"ts":"2026-02-17T00:25:00Z"}
  * @architectural-role Test Suite
  * @description
- * Validates the Project Boundary Library (Layer 1.5) extraction engine.
- * Updated to verify the Pre-Computed Type Closure architecture, ensuring that 
- * external dependencies are resolved via the global Type and Signature libraries.
+ * Part 1 of the Split Validation. Focuses exclusively on the "Boundary Scanner" 
+ * engine. Verifies that the system correctly identifies symbols that cross 
+ * from selected files into non-selected files (Context Leaks).
  * 
  * @contract
  *   assertions:
@@ -16,10 +16,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { NetworkHarness } from '../harness/network-harness.js';
 import { scanBoundaries } from '../../src/logic/symbolGraph/boundaryScanner/index.js';
-import { generateBoundaryLibrary } from '../../src/logic/symbolGraph/typeDefinitionExtractor.js';
 import type { SelectedFileMap } from '../../src/logic/symbolGraph/boundaryScanner/types.js';
 
-describe('Boundary Detection & Semantic Extraction', () => {
+describe('Layer 1.5: Boundary Detection (The Scanner)', () => {
   let harness: NetworkHarness;
 
   const TEST_ALIASES = {
@@ -32,88 +31,65 @@ describe('Boundary Detection & Semantic Extraction', () => {
     harness = await NetworkHarness.bootstrap();
   });
 
-  it('should resolve types from the pre-computed Type Library (LegacyUser)', async () => {
+  it('should detect a Value-level leak (Component Import)', () => {
     const fileIndex = harness.getFileIndex();
-    const typeLib = harness.getTypeLib();
-    const signLib = harness.getSignLib();
     
-    // SETUP: 'adapter.ts' imports 'LegacyUser' from 'oldTypes.ts'
+    // Entry2.tsx imports { Dashboard } from './Dashboard'
+    const entryPath = 'packages/web/Entry2.tsx';
+    const selectedFiles: SelectedFileMap = new Map();
+    selectedFiles.set(entryPath, harness.getAst(entryPath)!);
+
+    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
+    
+    const leak = boundarySymbols.find(s => s.identifier === 'Dashboard');
+    expect(leak).toBeDefined();
+    expect(leak?.sourcePath).toBe('packages/web/Dashboard.tsx');
+  });
+
+  it('should detect a Type-level leak (Interface Import)', () => {
+    const fileIndex = harness.getFileIndex();
+
+    // adapter.ts imports { LegacyUser } from '../legacy/oldTypes'
     const adapterPath = 'packages/web/adapter.ts';
     const selectedFiles: SelectedFileMap = new Map();
     selectedFiles.set(adapterPath, harness.getAst(adapterPath)!);
 
-    // 1. Scan Boundaries
     const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
-    
-    const legacyUser = boundarySymbols.find(s => s.identifier === 'LegacyUser');
-    expect(legacyUser).toBeDefined();
 
-    // 2. Generate Library using Dictionary Lookups
-    const library = await generateBoundaryLibrary(boundarySymbols, typeLib, signLib);
-    
-    // Verify semantic extraction
-    expect(library).toContain('=== PROJECT BOUNDARY DEFINITIONS ===');
-    expect(library).toContain('interface LegacyUser');
-    expect(library).toContain('oldId: number');
+    const leak = boundarySymbols.find(s => s.identifier === 'LegacyUser');
+    expect(leak).toBeDefined();
+    expect(leak?.sourcePath).toBe('packages/legacy/oldTypes.ts');
   });
 
-  it('should utilize Synthetic Signatures for value-level leaks (SuperAdmin link)', async () => {
+  it('should correctly resolve boundaries across monorepo aliases', () => {
     const fileIndex = harness.getFileIndex();
-    const typeLib = harness.getTypeLib();
-    const signLib = harness.getSignLib();
 
-    // App.tsx imports SuperAdmin (Type) but inheritance.ts also has _SEED_LINK (Value)
+    // App.tsx imports { SuperAdmin } from '@prism/shared-types/inheritance'
     const appPath = 'packages/web/App.tsx';
     const selectedFiles: SelectedFileMap = new Map();
     selectedFiles.set(appPath, harness.getAst(appPath)!);
 
     const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
     
-    // 2. Generate Library
-    const library = await generateBoundaryLibrary(boundarySymbols, typeLib, signLib);
-    
-    // Inheritance.ts contains several interfaces
-    expect(library).toContain('interface SuperAdmin');
-    expect(library).toContain('interface Admin');
-    // Verify "Local Chaser" logic: if it needed SuperAdmin, it should have 
-    // chased down the other interfaces in the same file.
-    expect(library).toContain('interface User');
+    const leak = boundarySymbols.find(s => s.identifier === 'SuperAdmin');
+    expect(leak).toBeDefined();
+    expect(leak?.sourcePath).toBe('packages/shared-types/inheritance.ts');
   });
 
-  it('should extract complex structures like Enums from the registry', async () => {
-    const typeLib = harness.getTypeLib();
-    const signLib = harness.getSignLib();
-
-    const boundarySymbols = [
-      { identifier: 'Role', sourcePath: 'packages/shared-types/enums.ts' }
-    ];
-
-    const library = await generateBoundaryLibrary(boundarySymbols, typeLib, signLib);
-
-    expect(library).toContain('enum Role');
-    expect(library).toContain("Admin = 'ADMIN'");
-  });
-
-  it('should provide synthetic declarations for component values', async () => {
+  it('should NOT report symbols if the source file is included in the pack', () => {
     const fileIndex = harness.getFileIndex();
-    const typeLib = harness.getTypeLib();
-    const signLib = harness.getSignLib();
 
-    // 'Entry2.tsx' imports 'Dashboard' from 'Dashboard.tsx'
-    // 'Dashboard' is a component (a Value), not a Type.
+    // If both Entry2.tsx AND Dashboard.tsx are selected, there is no boundary crossing.
     const entryPath = 'packages/web/Entry2.tsx';
+    const dashPath = 'packages/web/Dashboard.tsx';
+    
     const selectedFiles: SelectedFileMap = new Map();
     selectedFiles.set(entryPath, harness.getAst(entryPath)!);
+    selectedFiles.set(dashPath, harness.getAst(dashPath)!);
 
     const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
-    const dashboardLeak = boundarySymbols.find(s => s.identifier === 'Dashboard');
-    expect(dashboardLeak).toBeDefined();
-
-    const library = await generateBoundaryLibrary(boundarySymbols, typeLib, signLib);
-
-    // It should NOT contain the implementation (return 'dashboard')
-    // It SHOULD contain the synthetic signature generated by the worker
-    expect(library).toContain('export declare const Dashboard');
-    expect(library).not.toContain("return 'dashboard'");
+    
+    const leak = boundarySymbols.find(s => s.identifier === 'Dashboard');
+    expect(leak).toBeUndefined(); // Should be internal, not boundary
   });
 });

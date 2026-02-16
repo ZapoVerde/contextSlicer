@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/symbolGraph/typeDefinitionExtractor.ts
- * @stamp {"ts":"2026-02-16T19:15:00Z"}
+ * @stamp {"ts":"2026-02-16T23:25:00Z"}
  * @architectural-role Business Logic / Extraction Engine
  * @description
  * Extracts semantically distilled signatures and type contracts for boundary symbols.
@@ -65,16 +65,16 @@ export async function generateBoundaryLibrary(
     const addedIdentifiers = new Set<string>();
 
     /**
-     * Helper to chase local type dependencies within a signature string.
-     * Logic: If a signature mentions 'MyProps', and 'MyProps' is defined 
-     * in the same file's typeRegistry, we include it.
+     * The "Local Chaser": Recursively finds types within a text string 
+     * that exist in this file's type library.
      */
     const chaseLocalTypes = (text: string) => {
-      // Simple word-boundary regex to find potential type identifiers
+      // Find all potential identifiers (words) in the text
       const words = text.match(/\b(\w+)\b/g);
       if (!words) return;
 
       for (const word of words) {
+        // If the word matches a locally defined type we haven't included yet
         if (fileTypes[word] && !addedIdentifiers.has(word)) {
           addedIdentifiers.add(word);
           extractedLines.push(fileTypes[word]);
@@ -91,13 +91,14 @@ export async function generateBoundaryLibrary(
       if (fileSignatures[id]) {
         addedIdentifiers.add(id);
         extractedLines.push(fileSignatures[id]);
-        // Trigger the Chaser to find local props/types for this signature
+        // Trigger the Chaser to find local props/types mentioned in the signature
         chaseLocalTypes(fileSignatures[id]);
       } 
-      // Priority 2: Direct Type Definitions
+      // Priority 2: Direct Type Definitions (Interfaces/Aliases)
       else if (fileTypes[id]) {
         addedIdentifiers.add(id);
         extractedLines.push(fileTypes[id]);
+        // Recurse for nested type dependencies
         chaseLocalTypes(fileTypes[id]);
       }
     }

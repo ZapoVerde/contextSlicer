@@ -1,16 +1,15 @@
 /**
  * @file packages/core/test/harness/network-harness.ts
- * @stamp {"ts":"2026-02-16T23:15:00Z"}
+ * @stamp {"ts":"2026-02-17T00:15:00Z"}
  * @architectural-role Utility / Test Infrastructure
  * @description
  * The authoritative test harness for the Hardened Prism Network. Updated to 
- * utilize the production data pipeline. It mocks the WorkerPool to perform 
- * synchronous AST analysis, then feeds those results through the `buildSymbolGraph` 
- * orchestrator to populate the test harness's semantic libraries.
+ * utilize the production data pipeline directly via `analyzeFile`, ensuring 
+ * 1:1 parity between test mock execution and production worker behavior.
  * 
  * @core-principles
  * 1. TESTABILITY: MUST provide a synchronous simulation of worker threads.
- * 2. INTEGRITY: Validates the actual `buildSymbolGraph` pipeline return values.
+ * 2. INTEGRITY: Uses actual production logic (`analyzeFile`) to prevent mock drift.
  * 3. COMPLIANCE: Matches the DistilledMetadata protocol for all semantic registries.
  * 
  * @api-declaration
@@ -20,39 +19,18 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import traverse from '@babel/traverse';
-import type { Identifier } from '@babel/types';
-import { buildSymbolGraph } from '../../src/logic/symbolGraph/index.js';
-import { discoverSymbolsInAst } from '../../src/logic/symbolGraph/passes/2_discoverSymbols.js';
 import { parseSourceToAst } from '../../src/logic/symbolGraph/passes/1_buildAstCache.js';
-import { hasReexports, isBarrelFile } from '../../src/logic/symbolGraph/analyzers/barrelDetector.js';
-import { hasLogicActivity } from '../../src/logic/symbolGraph/analyzers/flowAnalyzer.js';
+import { buildSymbolGraph } from '../../src/logic/symbolGraph/index.js';
 import type { SymbolGraph } from '../../src/logic/symbolGraph/types.js';
 import type { FileEntry } from '../../src/state/slicer-state.js';
 import type { WorkerPool } from '../../src/logic/worker/WorkerPool.js';
 import type { WorkerResult, TaskType } from '../../src/logic/worker/types.js';
 
+// CRITICAL FIX: Use the actual production analyzer to ensure tests match reality
+import { analyzeFile } from '../../src/logic/worker/fileAnalyzer.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-/**
- * Formats captured import and export data into a clean text block.
- * Mirrors the logic in production fileAnalyzer.ts.
- */
-function formatContractBrief(importMap: Map<string, string[]>, exports: string[]): string {
-  const lines: string[] = ['\n--- STRUCTURAL CONTRACT ---'];
-  if (importMap.size > 0) {
-    lines.push('IMPORTS:');
-    importMap.forEach((names, source) => {
-      lines.push(`  - { ${names.join(', ')} } from '${source}'`);
-    });
-  }
-  if (exports.length > 0) {
-    lines.push('EXPORTS:');
-    exports.forEach(exp => lines.push(`  - ${exp}`));
-  }
-  return lines.join('\n');
-}
 
 /**
  * A specialized simulation of the WorkerPool for Node.js testing.
@@ -68,88 +46,21 @@ class MockWorkerPool {
   ): Promise<WorkerResult> {
     if (type === 'ANALYZE_FILE') {
       try {
+        if (!payload.path || payload.content === undefined) {
+           return { taskId: 'mock-task', error: 'Invalid payload' };
+        }
+
+        // Only analyze supported file types, mirroring production behavior
         if (!/\.(ts|tsx|js|jsx)$/.test(payload.path)) {
            return { taskId: 'mock-task' };
         }
 
-        const ast = parseSourceToAst(payload.content);
-        const imports: string[] = [];
-        const typeRegistry: Record<string, string> = {};
-        const syntheticSignatures: Record<string, string> = {};
-        
-        const importSummary = new Map<string, string[]>();
-        const exportSummary: string[] = [];
-
-        traverse(ast, {
-          ImportDeclaration(p) {
-            const source = p.node.source.value;
-            imports.push(source);
-            const names = p.node.specifiers.map(spec => {
-              if (spec.type === 'ImportSpecifier') return (spec.imported as Identifier).name;
-              return spec.type === 'ImportDefaultSpecifier' ? 'default' : '*';
-            });
-            importSummary.set(source, [...(importSummary.get(source) || []), ...names]);
-          },
-          ExportNamedDeclaration(p) {
-            if (p.node.source) {
-              imports.push(p.node.source.value);
-              const names = p.node.specifiers.map(s => (s.exported as Identifier).name);
-              importSummary.set(p.node.source.value, [...(importSummary.get(p.node.source.value) || []), ...names]);
-            }
-            
-            const decl = p.node.declaration;
-            if (!decl) {
-              p.node.specifiers.forEach(s => {
-                const name = (s.exported as Identifier).name;
-                exportSummary.push(name);
-              });
-              return;
-            }
-
-            // Extract Types
-            if (['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration'].includes(decl.type)) {
-              const name = (decl as any).id.name;
-              exportSummary.push(`${name} (Type)`);
-              if (decl.start !== null && decl.end !== null) {
-                typeRegistry[name] = payload.content.slice(decl.start, decl.end);
-              }
-            } 
-            // Extract Variables
-            else if (decl.type === 'VariableDeclaration') {
-              decl.declarations.forEach(d => {
-                const name = (d.id as Identifier).name;
-                exportSummary.push(`${name} (Variable)`);
-                syntheticSignatures[name] = `export declare const ${name}: any;`;
-              });
-            } 
-            // Extract Functions
-            else if (decl.type === 'FunctionDeclaration' && decl.id) {
-              exportSummary.push(`${decl.id.name} (Function)`);
-              syntheticSignatures[decl.id.name] = `export declare function ${decl.id.name}(...args: any[]): any;`;
-            }
-          },
-          ExportDefaultDeclaration() {
-            exportSummary.push('default');
-          },
-          ExportAllDeclaration(p) {
-            imports.push(p.node.source.value);
-            importSummary.set(p.node.source.value, [...(importSummary.get(p.node.source.value) || []), '*']);
-          }
-        });
+        // Execute the REAL production logic
+        const metadata = analyzeFile(payload.path, payload.content);
 
         return {
           taskId: 'mock-task',
-          payload: {
-            filePath: payload.path,
-            symbols: discoverSymbolsInAst(ast),
-            imports: Array.from(new Set(imports)),
-            hasReexports: hasReexports(ast),
-            hasLogicActivity: hasLogicActivity(ast),
-            isBarrel: isBarrelFile(ast),
-            typeRegistry,
-            syntheticSignatures,
-            contractBrief: formatContractBrief(importSummary, exportSummary)
-          },
+          payload: metadata,
         };
       } catch (e) {
         return { taskId: 'mock-task', error: e instanceof Error ? e.message : 'Mock Analysis Failed' };
