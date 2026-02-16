@@ -1,6 +1,6 @@
 /**
  * @file packages/core/test/specs/03-resolution-priority.spec.ts
- * @stamp {"ts":"2026-02-15T21:30:00Z"}
+ * @stamp {"ts":"2026-02-16T07:05:00Z"}
  * @architectural-role Test Suite
  * @description
  * Validates the resolution assignment logic and conflict reconciliation.
@@ -118,11 +118,14 @@ describe('Resolution Priority & Reconciliation', () => {
       const fileIndex = harness.getFileIndex();
       const graph = harness.getSymbolGraph();
 
-      // Only trace, no seeds for shared-types
+      // FIX: Set traceDepth to 0. 
+      // App.tsx imports inheritance.ts directly (1 hop). 
+      // If traceDepth is 1, inheritance.ts becomes Full.
+      // We want it to be a Summary to test the suffix logic.
       const state = createBaseState({
         traceQuery: 'packages/web/App.tsx',
-        traceDepth: 1,      // App (0) -> ComplexBarrel (0) -> components/index (0)
-        summaryTraceDepth: 5 // Will reach shared-types/inheritance.ts at depth > 1
+        traceDepth: 0,      // Immediate summary for any discovered neighbor
+        summaryTraceDepth: 5 
       });
 
       const { paths } = await discoverContextPaths(fileIndex, graph, state);

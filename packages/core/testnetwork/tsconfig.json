@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
+    "jsx": "react",
     "paths": {
       "@prism/shared-types/*": ["packages/shared-types/*"],
       "@prism/ui-kit/*": ["packages/ui-kit/*"],

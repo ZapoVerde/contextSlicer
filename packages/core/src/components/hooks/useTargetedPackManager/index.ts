@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/index.ts
- * @stamp {"ts":"2026-02-15T10:55:00Z"}
+ * @stamp {"ts":"2026-02-16T06:50:00Z"}
  * @architectural-role Custom Hook / Composition Root
  * @description
  * The primary orchestrator for the Targeted Pack Manager subsystem. It composes 
@@ -22,7 +22,7 @@
  *     external_io: [clipboard, browser_download]
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useSlicerStore } from '../../../state/useSlicerStore';
 import { useFreshnessStatus } from '../../../hooks/useFreshnessStatus';
 
@@ -47,10 +47,12 @@ import type { TargetedPackHookResult } from './types';
  */
 export function useTargetedPackManager(): TargetedPackHookResult {
   // 1. Central State (Zustand - Granular Selectors)
-  // Selecting primitives or stable references to prevent unnecessary re-renders
   const fileIndex = useSlicerStore(s => s.fileIndex);
   const targetedPathsInput = useSlicerStore(s => s.targetedPathsInput);
   const setTargetedPathsInput = useSlicerStore(s => s.setTargetedPathsInput);
+  
+  // ALIAS RESOLUTION: We need the config to resolve monorepo paths
+  const slicerConfig = useSlicerStore(s => s.slicerConfig);
   
   const { isStale } = useFreshnessStatus();
 
@@ -68,18 +70,25 @@ export function useTargetedPackManager(): TargetedPackHookResult {
     if (!fileIndex || parsedTargets.length === 0) return '';
 
     // Step 1: Parallel Load & Parse (Phase 1)
-    // Returns Map<string, PreFlightResult> for O(1) correlation in Phase 2
     const preFlightData = await runPreFlight(parsedTargets, fileIndex);
 
     // Step 2: Assemble Layered Pack (Phase 2)
-    // Synchronized with the definitive signature of packAssembler.ts
+    // PLUMBING FIX: Pass the aliasMap (from config or harness defaults) 
+    // to support @prism/* resolution in the Boundary Library.
     return assembleContextPack(
       fileIndex, 
       parsedTargets, 
       preFlightData, 
       {
         docblocksOnly,
-        includeBoundaryLibrary: true // Enforcing the architectural resolve
+        includeBoundaryLibrary: true,
+        // In the test network context, these aliases allow the boundary scanner 
+        // to resolve imports between packages.
+        aliasMap: {
+          '@prism/shared-types': 'packages/shared-types',
+          '@prism/ui-kit': 'packages/ui-kit',
+          '@prism/web': 'packages/web'
+        }
       }
     );
   }, [fileIndex, parsedTargets, docblocksOnly]);

@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/components/hooks/useTargetedPackManager/packAssembler.ts
- * @stamp {"ts":"2026-02-15T22:20:00Z"}
+ * @stamp {"ts":"2026-02-16T06:35:00Z"}
  * @architectural-role Business Logic / Orchestrator
  * @description
  * Orchestrates the construction of the multi-layered context pack. It applies a 
@@ -42,8 +42,12 @@ import type {
 import type { File } from '@babel/types';
 
 interface AssemblerOptions {
+  /** If true, only extract the JSDoc/Preamble for files. */
   docblocksOnly: boolean;
+  /** If true, discovers and includes definitions for symbols that cross the pack boundary. */
   includeBoundaryLibrary: boolean;
+  /** Mapping of monorepo/tsconfig aliases to physical directory paths. */
+  aliasMap?: Record<string, string>;
 }
 
 /**
@@ -51,7 +55,7 @@ interface AssemblerOptions {
  * @description
  * Builds the final context pack string. It iterates through targets to build 
  * Source Logic and performs a boundary scan on Seed files to generate the 
- * Layer 1.5 Boundary Library.
+ * Layer 1.5 Boundary Library. Now utilizes the aliasMap for accurate monorepo resolution.
  */
 export async function assembleContextPack(
   fileIndex: Map<string, FileEntry>,
@@ -126,15 +130,11 @@ export async function assembleContextPack(
   // --- LAYER 1.5: BOUNDARY LIBRARY ---
   // We scan the symbols imported by our Seeds that are NOT in the selection.
   if (options.includeBoundaryLibrary && selectedFilesForBoundaryScan.size > 0) {
-    // Note: scanBoundaries will use the aliasMap if we pass it, but here we relies on
-    // the simpler version or update the signature if needed. 
-    // The previous Turn 3 update to scanBoundaries allows an optional aliasMap.
-    // For now, we use defaults as the aliasMap isn't passed into assembleContextPack.
-    // (In a full app, this comes from config, but for now defaults are safe).
+    // RESOLUTION FIX: Pass the aliasMap to the scanner to support monorepo imports (@prism/*)
     const boundarySymbols = scanBoundaries(
       fileIndex,
       selectedFilesForBoundaryScan,
-      {} // Todo: Inject aliasMap from store/config if available
+      options.aliasMap || {}
     );
 
     if (boundarySymbols.length > 0) {

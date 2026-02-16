@@ -1,6 +1,6 @@
 /**
  * @file packages/core/test/specs/04-boundary-detection.spec.ts
- * @stamp {"ts":"2026-02-15T22:15:00Z"}
+ * @stamp {"ts":"2026-02-16T06:45:00Z"}
  * @architectural-role Test Suite
  * @description
  * Validates the Project Boundary Library (Layer 1.5) extraction engine.
@@ -22,6 +22,13 @@ import type { SelectedFileMap } from '../../src/logic/symbolGraph/boundaryScanne
 describe('Boundary Detection & Type Extraction', () => {
   let harness: NetworkHarness;
 
+  // Authorities for the test network
+  const TEST_ALIASES = {
+    '@prism/shared-types': 'packages/shared-types',
+    '@prism/ui-kit': 'packages/ui-kit',
+    '@prism/web': 'packages/web'
+  };
+
   beforeAll(async () => {
     harness = await NetworkHarness.bootstrap();
   });
@@ -36,8 +43,8 @@ describe('Boundary Detection & Type Extraction', () => {
     const selectedFiles: SelectedFileMap = new Map();
     selectedFiles.set(adapterPath, harness.getAst(adapterPath)!);
 
-    // 1. Scan Boundaries
-    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles);
+    // 1. Scan Boundaries (Using default aliases for standard resolution)
+    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
     
     // Verify LegacyUser was detected
     const legacyUser = boundarySymbols.find(s => s.identifier === 'LegacyUser');
@@ -60,7 +67,8 @@ describe('Boundary Detection & Type Extraction', () => {
     const selectedFiles: SelectedFileMap = new Map();
     selectedFiles.set(appPath, harness.getAst(appPath)!);
 
-    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles);
+    // FIX: Pass TEST_ALIASES so the scanner can resolve @prism/shared-types
+    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
 
     // App.tsx imports SuperAdmin from '@prism/shared-types/inheritance'
     const superAdmin = boundarySymbols.find(s => s.identifier === 'SuperAdmin');
@@ -75,7 +83,7 @@ describe('Boundary Detection & Type Extraction', () => {
     const selectedFiles: SelectedFileMap = new Map();
     selectedFiles.set(typeOnlyPath, harness.getAst(typeOnlyPath)!);
 
-    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles);
+    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
 
     // TypeOnly.ts uses: import type { User } from '../shared-types/inheritance'
     const userType = boundarySymbols.find(s => s.identifier === 'User');
@@ -113,7 +121,7 @@ describe('Boundary Detection & Type Extraction', () => {
     const selectedFiles: SelectedFileMap = new Map();
     selectedFiles.set(appPath, harness.getAst(appPath)!);
 
-    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles);
+    const boundarySymbols = scanBoundaries(fileIndex, selectedFiles, TEST_ALIASES);
 
     // These should NOT be present in the boundary symbols
     const reactImport = boundarySymbols.find(s => s.sourcePath.includes('react'));

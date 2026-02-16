@@ -1,4 +1,3 @@
-
 [![CI Status](https://img.shields.io/github/actions/workflow/status/ZapoVerde/contextSlicer/ci.yml?branch=main)](https://github.com/ZapoVerde/contextSlicer/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/ZapoVerde/contextSlicer)](https://github.com/ZapoVerde/contextSlicer/blob/main/LICENSE)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/ZapoVerde/contextSlicer)](https://github.com/ZapoVerde/contextSlicer/releases/latest)
@@ -16,7 +15,7 @@
 
 **Context Slicer automates that hunt.**
 
-It creates token-efficient "context packs" by understanding your code's structure. Its core feature is **dependency-aware tracing**: give it a starting point, and it spiders through your import graph to find exactly what the AI needs to understand that file.
+It creates "context packs" by understanding your code's structure using a real AST graph. Unlike dumb concatenation tools, Context Slicer uses **Smart Tracing** to distinguishing between meaningful logic and structural boilerplate, ensuring you give the AI exactly what it needs—and nothing else.
 
 ---
 
@@ -77,15 +76,28 @@ You do not need to edit the YAML file manually.
 
 ---
 
-## 🛠 Features
+## 🛠 Core Features (v2.1)
 
-*   **Dependency-Aware Tracing:** Select a file, and the Slicer finds all imports and dependents automatically using a real AST graph.
-*   **Smart Sanitation:**
-    *   **Desktop Mode:** Configurable via `slicer-config.yaml`. Explicitly excludes noise like `node_modules` and `.git`.
-    *   **Web Mode:** Supports "Volatile Configuration," allowing you to filter a loaded Zip file in-memory without modifying the file itself.
-*   **Live Mode:** The desktop app watches your filesystem. Changes you make in your IDE are instantly reflected in the Slicer.
-*   **Docblock Extraction:** Option to export *only* the JSDoc/comments from files to generate high-level architectural summaries.
-*   **Presets:** Create one-click buttons (via config) to select specific architectural layers (e.g., "Auth System", "Database Schema").
+### 🧠 Architectural Intelligence
+Context Slicer builds a **Three-Layer Context Pack** designed to maximize LLM reasoning while minimizing token usage.
+
+1.  **Resolution Gradient (Full vs. Summary):**
+    *   **Seed Files:** Files you explicitly select (or immediate neighbors) are included with **Full Source Code**.
+    *   **Distant Dependencies:** Files further down the chain are distilled into **Architectural Summaries**. The AI sees the docblocks, the types, and the API surface, but not the implementation details.
+    
+2.  **Smart "Pipe" Detection:**
+    *   The tracer identifies "Barrel" files (`index.ts` re-exports) as structural pipes.
+    *   It treats these as **0-cost wormholes**, allowing it to trace through deep folder structures without filling your context window with useless export lists.
+
+3.  **Boundary Library (Layer 1.5):**
+    *   If your code imports a type from a file that is *excluded* (e.g., a legacy folder or a huge shared library), Slicer performs a **Shallow Peek**.
+    *   It extracts *only* the definition of that specific type (Interface, Enum, Class) and adds it to a special "Boundary Library" section. This prevents "Type Hallucinations" where the AI guesses the shape of missing data.
+
+### ⚡ Workflow Features
+*   **Monorepo Native:** Fully understands path aliases (e.g., `@prism/shared/*`) defined in `tsconfig.json` or `package.json`.
+*   **Live Mode:** The desktop app watches your filesystem via WebSocket. Changes you make in your IDE are instantly reflected in the Slicer.
+*   **Volatile Configuration (Web Mode):** When running in the browser with a Zip file, you can filter the file list in-memory without modifying the original zip.
+*   **Presets:** Configure one-click buttons to select specific architectural layers (e.g., "Auth System", "Database Schema").
 
 ---
 
