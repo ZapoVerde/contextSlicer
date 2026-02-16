@@ -1,16 +1,17 @@
 /**
  * @file packages/core/src/state/slicer-graph-manager/index.ts
- * @stamp {"ts":"2026-02-16T22:55:00Z"}
+ * @stamp {"ts":"2026-02-16T21:15:00Z"}
  * @architectural-role State Management / Composition Root
  * @description
  * The main entry point for the Graph and Assembly state slice. Orchestrates 
  * the integration of modular graph building, semantic registry management, 
- * and context pack assembly. 
+ * and context pack assembly. Now captures bulk indexing results to populate 
+ * semantic libraries for architectural extraction.
  *
  * @core-principles
  * 1. COMPOSITION: ORCHESTRATES modular logic into a unified store slice.
- * 2. SEPARATION: DELEGATES complex workflows to specialized sub-modules.
- * 3. STABILITY: MUST ensure the WorkerPool and libraries are correctly initialized.
+ * 2. DATA PIPELINE: ENFORCES metadata synchronization between workers and state.
+ * 3. SEPARATION: DELEGATES complex workflows to specialized sub-modules.
  *
  * @api-declaration
  *   export interface GraphSlice { ... }
@@ -28,7 +29,6 @@ import { WorkerPool } from '../../logic/worker/WorkerPool.js';
 import { buildGraphLogic, patchNodeLogic, applyMetadataToGraph } from './graphBuilder.js';
 import { orchestrateAssembly as producePack } from './assemblyOrchestrator.js';
 import { updateLibraries, bulkUpdateLibraries, type RegistryLibs } from './registry.js';
-import type { SymbolGraph } from '../../logic/symbolGraph/types.js';
 
 /**
  * @id packages/core/src/state/slicer-graph-manager/index.ts#GraphSlice
@@ -37,7 +37,7 @@ import type { SymbolGraph } from '../../logic/symbolGraph/types.js';
  */
 export interface GraphSlice {
   workerPool: WorkerPool | null;
-  symbolGraph: SymbolGraph | null;
+  symbolGraph: import('../../logic/symbolGraph/types.js').SymbolGraph | null;
   graphStatus: 'idle' | 'building' | 'ready' | 'error';
   resolutionErrors: string[];
   
@@ -94,20 +94,28 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
     set({ graphStatus: 'building', resolutionErrors: [] });
     
     try {
-      const aliasMap = slicerConfig?.project?.targetProjectRoot ? {} : {}; // Simplified for now
-      const { graph, errors } = await buildGraphLogic(fileIndex, pool, aliasMap); 
+      // 1. Build Graph Topology and collect raw worker metadata
+      const { graph, results, errors } = await buildGraphLogic(fileIndex, pool, {}); 
 
-      // Note: In this architecture, we assume buildGraphLogic/buildSymbolGraph
-      // populates the libraries via internal worker results during Pass 1.
-      // If Pass 1 is handled inside buildSymbolGraph, we ensure the 
-      // libraries are updated in the store state.
+      // 2. Prepare Local Library Buffers
+      const libs: RegistryLibs = {
+        typeLibrary: new Map(),
+        signatureLibrary: new Map(),
+        contractLibrary: new Map()
+      };
+
+      // 3. Populate Libraries from Worker Results
+      bulkUpdateLibraries(results, libs);
       
+      // 4. Update Store
       set({ 
         symbolGraph: graph, 
+        ...libs,
         graphStatus: 'ready', 
         resolutionErrors: errors 
       });
     } catch (e: unknown) {
+      console.error('[GraphManager] Initialization failed:', e);
       set({ 
         graphStatus: 'error',
         resolutionErrors: ['FATAL: Graph generation failed.'],
@@ -177,7 +185,6 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
           isAssembling: false
         });
       } else {
-        // Result null indicates interruption by a newer request
         set({ isAssembling: false });
       }
     } catch (e) {

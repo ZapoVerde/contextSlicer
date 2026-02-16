@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/state/slicer-graph-manager/registry.ts
- * @stamp {"ts":"2026-02-16T19:40:00Z"}
+ * @stamp {"ts":"2026-02-16T21:20:00Z"}
  * @architectural-role Business Logic / Librarian
  * @description
  * Provides logic for aggregating and synchronizing semantic metadata results 
@@ -25,7 +25,7 @@
 import type { WorkerResult, DistilledMetadata } from '../../logic/worker/types.js';
 
 /**
- * Container for the three primary semantic registries.
+ * Container for the primary semantic registries.
  */
 export interface RegistryLibs {
   typeLibrary: Map<string, Record<string, string>>;
@@ -55,22 +55,23 @@ export function updateLibraries(
 /**
  * @id packages/core/src/state/slicer-graph-manager/registry.ts#bulkUpdateLibraries
  * @description
- * Consolidates a collection of worker results into the libraries.
+ * Consolidates a collection of worker results into the libraries. Corrected 
+ * to handle the flat payload structure of WorkerResult.
  * 
  * @param results - Array of worker results from a bulk indexing operation.
  * @param libs - The active library maps to update.
  */
 export function bulkUpdateLibraries(
-    results: WorkerResult[], 
-    libs: RegistryLibs
-  ): void {
-    for (const res of results) {
-      // res is WorkerResult. res.payload is DistilledMetadata.
-      if (res.payload) {
-        updateLibraries(res.payload.filePath, res.payload, libs);
-      }
+  results: WorkerResult[], 
+  libs: RegistryLibs
+): void {
+  for (const res of results) {
+    // res.payload contains the DistilledMetadata object.
+    if (res.payload) {
+      updateLibraries(res.payload.filePath, res.payload, libs);
     }
   }
+}
 
 /**
  * @id packages/core/src/state/slicer-graph-manager/registry.ts#clearPathFromLibraries

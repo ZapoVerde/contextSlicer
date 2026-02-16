@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/state/slicer-graph-manager/graphBuilder.ts
- * @stamp {"ts":"2026-02-16T22:15:00Z"}
+ * @stamp {"ts":"2026-02-16T21:05:00Z"}
  * @architectural-role Business Logic / Builder
  * @description
  * Manages the construction and incremental maintenance of the symbol dependency 
@@ -10,36 +10,37 @@
  * @core-principles
  * 1. SEPARATION: MUST isolate graph construction from state storage.
  * 2. INCREMENTALISM: ENFORCES differential updates to prevent full re-indexes.
- * 3. EFFICIENCY: Uses O(1) Map operations for node replacement.
+ * 3. PIPELINE-INTEGRITY: Propagates worker-distilled metadata to the main thread.
  *
  * @api-declaration
- *   export async function buildGraphLogic(...): Promise<{ graph: SymbolGraph; errors: string[] }>;
+ *   export async function buildGraphLogic(...): Promise<{ graph: SymbolGraph; results: WorkerResult[]; errors: string[] }>;
  *   export async function patchNodeLogic(...): Promise<{ metadata: DistilledMetadata } | null>;
  *
  * @contract
  *   assertions:
- *     purity: side-effects # Performs I/O and worker execution.
+ *     purity: side-effects # Performs worker execution.
  *     external_io: worker_pool
  */
 
 import { buildSymbolGraph } from '../../logic/symbolGraph/index.js';
 import type { SymbolGraph, FileEntry } from '../../logic/symbolGraph/types.js';
 import type { WorkerPool } from '../../logic/worker/WorkerPool.js';
-import type { DistilledMetadata } from '../../logic/worker/types.js';
+import type { DistilledMetadata, WorkerResult } from '../../logic/worker/types.js';
 
 /**
  * @id packages/core/src/state/slicer-graph-manager/graphBuilder.ts#buildGraphLogic
  * @description
- * Orchestrates the full construction of the dependency graph.
+ * Orchestrates the full construction of the dependency graph and returns 
+ * the raw worker results for registry synchronization.
  */
 export async function buildGraphLogic(
   fileIndex: Map<string, FileEntry>,
   workerPool: WorkerPool,
   aliasMap: Record<string, string> = {}
-): Promise<{ graph: SymbolGraph; errors: string[] }> {
+): Promise<{ graph: SymbolGraph; results: WorkerResult[]; errors: string[] }> {
   const errors: string[] = [];
-  const graph = await buildSymbolGraph(fileIndex, aliasMap, errors, workerPool);
-  return { graph, errors };
+  const { graph, results } = await buildSymbolGraph(fileIndex, aliasMap, errors, workerPool);
+  return { graph, results, errors };
 }
 
 /**

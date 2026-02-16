@@ -7,7 +7,7 @@
  * Validates the resolution assignment logic and conflict reconciliation rules.
  * Uses an in-memory Micro-Repo to ensure tests are independent of physical 
  * file structures. Updated to satisfy the DistilledMetadata interface requiring 
- * semantic registries and contract briefs.
+ * imports, semantic registries, and contract briefs.
  *
  * @criticality 2. Core Business Logic Orchestration.
  * @testing-layer Unit
@@ -90,7 +90,7 @@ async function setupMicroRepo() {
     })
   } as unknown as WorkerPool;
 
-  const graph = await buildSymbolGraph(fileIndex, {}, [], mockPool);
+  const { graph } = await buildSymbolGraph(fileIndex, {}, [], mockPool);
   
   return { fileIndex, graph };
 }

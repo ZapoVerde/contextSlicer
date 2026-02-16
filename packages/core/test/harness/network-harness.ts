@@ -1,17 +1,17 @@
 /**
  * @file packages/core/test/harness/network-harness.ts
- * @stamp {"ts":"2026-02-16T22:50:00Z"}
+ * @stamp {"ts":"2026-02-16T23:15:00Z"}
  * @architectural-role Utility / Test Infrastructure
  * @description
  * The authoritative test harness for the Hardened Prism Network. Updated to 
- * support structural Contract Briefs. The MockWorkerPool now simulates the 
- * AST-driven extraction of import and export names, populating the global 
- * contract library for integration testing.
+ * utilize the production data pipeline. It mocks the WorkerPool to perform 
+ * synchronous AST analysis, then feeds those results through the `buildSymbolGraph` 
+ * orchestrator to populate the test harness's semantic libraries.
  * 
  * @core-principles
  * 1. TESTABILITY: MUST provide a synchronous simulation of worker threads.
- * 2. CONSISTENCY: Uses the same analysis logic as the production worker.
- * 3. COMPLIANCE: Matches the updated DistilledMetadata messaging protocol.
+ * 2. INTEGRITY: Validates the actual `buildSymbolGraph` pipeline return values.
+ * 3. COMPLIANCE: Matches the DistilledMetadata protocol for all semantic registries.
  * 
  * @api-declaration
  *   export class NetworkHarness { ... }
@@ -106,19 +106,24 @@ class MockWorkerPool {
               return;
             }
 
+            // Extract Types
             if (['TSInterfaceDeclaration', 'TSTypeAliasDeclaration', 'TSEnumDeclaration'].includes(decl.type)) {
               const name = (decl as any).id.name;
               exportSummary.push(`${name} (Type)`);
               if (decl.start !== null && decl.end !== null) {
                 typeRegistry[name] = payload.content.slice(decl.start, decl.end);
               }
-            } else if (decl.type === 'VariableDeclaration') {
+            } 
+            // Extract Variables
+            else if (decl.type === 'VariableDeclaration') {
               decl.declarations.forEach(d => {
                 const name = (d.id as Identifier).name;
                 exportSummary.push(`${name} (Variable)`);
                 syntheticSignatures[name] = `export declare const ${name}: any;`;
               });
-            } else if (decl.type === 'FunctionDeclaration' && decl.id) {
+            } 
+            // Extract Functions
+            else if (decl.type === 'FunctionDeclaration' && decl.id) {
               exportSummary.push(`${decl.id.name} (Function)`);
               syntheticSignatures[decl.id.name] = `export declare function ${decl.id.name}(...args: any[]): any;`;
             }
@@ -160,9 +165,12 @@ class MockWorkerPool {
 export class NetworkHarness {
   private readonly fileIndex: Map<string, FileEntry> = new Map();
   private symbolGraph: SymbolGraph | null = null;
+  
+  // Semantic Libraries
   private typeLib: Map<string, Record<string, string>> = new Map();
   private signLib: Map<string, Record<string, string>> = new Map();
   private contractLib: Map<string, string> = new Map();
+  
   private readonly networkPath: string;
 
   private constructor() {
@@ -201,17 +209,27 @@ export class NetworkHarness {
 
   private async buildGraph(): Promise<void> {
     const mockPool = new MockWorkerPool() as unknown as WorkerPool;
-    for (const file of this.fileIndex.values()) {
-      if (!/\.(ts|tsx|js|jsx)$/.test(file.path)) continue;
-      const res = await mockPool.execute('ANALYZE_FILE', { path: file.path, content: await file.getText() });
-      if (res.payload) {
-        this.typeLib.set(file.path, res.payload.typeRegistry);
-        this.signLib.set(file.path, res.payload.syntheticSignatures);
-        this.contractLib.set(file.path, res.payload.contractBrief);
-      }
-    }
     const errors: string[] = [];
-    this.symbolGraph = await buildSymbolGraph(this.fileIndex, {}, errors, mockPool);
+    const aliasMap = {
+      '@prism/shared-types': 'packages/shared-types',
+      '@prism/ui-kit': 'packages/ui-kit',
+      '@prism/web': 'packages/web'
+    };
+
+    // Execute the production orchestrator
+    // This tests that buildSymbolGraph correctly aggregates worker results
+    const { graph, results } = await buildSymbolGraph(this.fileIndex, aliasMap, errors, mockPool);
+    this.symbolGraph = graph;
+
+    // Populate local libraries from the returned results
+    // This mirrors the logic in the main-thread registry.ts
+    results.forEach(res => {
+      if (res.payload) {
+        this.typeLib.set(res.payload.filePath, res.payload.typeRegistry);
+        this.signLib.set(res.payload.filePath, res.payload.syntheticSignatures);
+        this.contractLib.set(res.payload.filePath, res.payload.contractBrief);
+      }
+    });
   }
 
   public getFileIndex(): Map<string, FileEntry> { return this.fileIndex; }
