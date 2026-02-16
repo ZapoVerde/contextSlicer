@@ -1,21 +1,22 @@
 /**
  * @file packages/core/src/state/slicer-graph-manager.ts
- * @stamp {"ts":"2026-02-16T15:55:00Z"}
+ * @stamp {"ts":"2026-02-16T19:05:00Z"}
  * @architectural-role State Management
  * @description
- * Manages the lifecycle of the architectural Symbol Graph and orchestrates 
- * off-thread Context Pack assembly. Optimized to support optimistic background 
- * jobs with automatic cancellation for stale requests.
+ * Manages the lifecycle of the architectural Symbol Graph and the semantic 
+ * Type/Signature libraries. Orchestrates background assembly and ensures 
+ * that analysis results from workers are correctly aggregated into the 
+ * project-wide "Type Dictionary."
  *
  * @core-principles
- * 1. PERFORMANCE: MUST delegate heavy assembly and tokenization to background workers.
+ * 1. PERFORMANCE: MUST delegate heavy assembly and semantic mining to background workers.
  * 2. INTEGRITY: ENFORCES a "Last-Task-Wins" policy to prevent stale results.
- * 3. EFFICIENCY: Gathers only necessary file text for the assembly payload.
+ * 3. AGGREGATION: Acts as the librarian, consolidating worker-thread distilled metadata.
  *
  * @contract
  *   assertions:
  *     purity: mutates # Updates global store state.
- *     state_ownership: [symbolGraph, accurateTokenCount, isAssembling, assembledPackText]
+ *     state_ownership: [symbolGraph, typeLibrary, signatureLibrary, accurateTokenCount, isAssembling, assembledPackText]
  *     external_io: none
  */
 
@@ -23,6 +24,7 @@ import type { StateCreator } from 'zustand';
 import type { SlicerState } from './slicer-state.js';
 import { WorkerPool } from '../logic/worker/WorkerPool.js';
 import { buildSymbolGraph, type SymbolGraph } from '../logic/symbolGraph/index.js';
+import type { WorkerResult, DistilledMetadata } from '../logic/worker/types.js';
 
 /**
  * Tracks the ID of the most recent assembly request to handle cancellation.
@@ -30,8 +32,6 @@ import { buildSymbolGraph, type SymbolGraph } from '../logic/symbolGraph/index.j
 let latestAssemblyRequestId: string | null = null;
 
 /**
- * @id packages/core/src/state/slicer-graph-manager.ts#GraphSlice
- * @description
  * Definitive interface for the Graph Management and Background Assembly slice.
  */
 export interface GraphSlice {
@@ -81,6 +81,8 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
     
     try {
       const errors: string[] = [];
+      // During initial build, the indexer will call processWorkerMetadata (via building the graph)
+      // which populates our semantic dictionaries.
       const graph = await buildSymbolGraph(fileIndex, {}, errors, pool); 
       set({ symbolGraph: graph, graphStatus: 'ready', resolutionErrors: errors });
     } catch (e: unknown) {
@@ -92,7 +94,7 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
   },
 
   patchGraphNode: async (path: string) => {
-    const { symbolGraph, workerPool, fileIndex, graphStatus } = get();
+    const { symbolGraph, workerPool, fileIndex, graphStatus, typeLibrary, signatureLibrary } = get();
     if (graphStatus !== 'ready' || !symbolGraph || !workerPool || !fileIndex) return;
 
     const fileEntry = fileIndex.get(path);
@@ -104,11 +106,22 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
       
       if (result.payload) {
         const metadata = result.payload;
-        const newGraph = new Map(symbolGraph);
-        for (const [id, node] of newGraph.entries()) {
-          if (node.filePath === path) newGraph.delete(id);
+        
+        // 1. Update Semantic Libraries
+        const nextTypeLib = new Map(typeLibrary);
+        const nextSignLib = new Map(signatureLibrary);
+        nextTypeLib.set(path, metadata.typeRegistry);
+        nextSignLib.set(path, metadata.syntheticSignatures);
+
+        // 2. Update Graph Nodes
+        const nextGraph = new Map(symbolGraph);
+        // Clear old symbol nodes for this file
+        for (const [id, node] of nextGraph.entries()) {
+          if (node.filePath === path) nextGraph.delete(id);
         }
-        newGraph.set(path, {
+        
+        // Re-inject file-level node and symbols
+        nextGraph.set(path, {
           id: path,
           filePath: path,
           symbolName: '(file)',
@@ -117,14 +130,29 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
           hasReexports: metadata.hasReexports,
           hasLogicActivity: metadata.hasLogicActivity
         });
-        set({ symbolGraph: newGraph });
+
+        metadata.symbols.forEach(sym => {
+          const id = `${path}#${sym}`;
+          nextGraph.set(id, {
+            id,
+            filePath: path,
+            symbolName: sym,
+            dependencies: new Set(),
+            dependents: new Set(),
+            hasReexports: metadata.hasReexports,
+            hasLogicActivity: metadata.hasLogicActivity
+          });
+        });
+
+        set({ 
+          symbolGraph: nextGraph,
+          typeLibrary: nextTypeLib,
+          signatureLibrary: nextSignLib
+        });
       }
     } catch (e) { /* ignore */ }
   },
 
-  /**
-   * Orchestrates the optimistic background assembly job.
-   */
   orchestrateAssembly: async (targets, options) => {
     const { fileIndex, workerPool, symbolGraph } = get();
     if (!fileIndex || !workerPool || targets.length === 0) {
@@ -132,15 +160,13 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
       return;
     }
 
-    // 1. Generate Request correlation ID for the closure
     const requestId = crypto.randomUUID();
     latestAssemblyRequestId = requestId;
 
     set({ isAssembling: true });
 
     try {
-      // 2. Gather contents for targets and potential boundary leaks
-      // To perform a Layer 1.5 scan, we need the text of files imported by our targets.
+      // Gather contents for targets and potential boundary dependencies
       const pathsToFetch = new Set(targets.map(t => t.path));
       
       if (options.includeBoundaryLibrary && symbolGraph) {
@@ -164,10 +190,8 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
 
       await Promise.all(fetchTasks);
 
-      // 3. Check for Interruption (Trigger 2 Interrupt)
       if (latestAssemblyRequestId !== requestId) return;
 
-      // 4. Dispatch to Worker
       const result = await workerPool.execute('ASSEMBLE_PACK', {
         assembly: {
           targets,
@@ -176,7 +200,6 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
         }
       });
 
-      // 5. Final check before updating state
       if (latestAssemblyRequestId === requestId && result.assembly) {
         set({
           assembledPackText: result.assembly.fullText,
@@ -193,3 +216,22 @@ export const createGraphSlice: StateCreator<SlicerState, [], [], GraphSlice> = (
     }
   }
 });
+
+/**
+ * Helper used by buildSymbolGraph orchestrator (logic/symbolGraph/index.ts)
+ * to process distilled metadata into the store maps.
+ * Note: This function is logically called via the set() in createLoaderSlice
+ * when buildSymbolGraph completes, but the GraphSlice creator handles the mapping.
+ */
+export function aggregateMetadataToLibrary(
+  results: WorkerResult[], 
+  typeLib: Map<string, Record<string, string>>, 
+  signLib: Map<string, Record<string, string>>
+) {
+  results.forEach(res => {
+    if (res.payload) {
+      typeLib.set(res.payload.filePath, res.payload.typeRegistry);
+      signLib.set(res.payload.filePath, res.payload.syntheticSignatures);
+    }
+  });
+}

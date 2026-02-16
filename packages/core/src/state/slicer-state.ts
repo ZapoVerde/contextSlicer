@@ -1,8 +1,17 @@
 /**
  * @file packages/core/src/state/slicer-state.ts
- * @stamp {"ts":"2026-02-16T15:45:00Z"}
+ * @stamp {"ts":"2026-02-16T18:45:00Z"}
  * @architectural-role Type Definition
- * @description Defines the canonical state shape for the Context Slicer application.
+ * @description 
+ * Defines the canonical state shape and initial values for the Context Slicer store.
+ * Now expanded to include high-performance semantic registries for pre-computed 
+ * type closures and synthetic signatures.
+ * 
+ * @core-principles
+ * 1. IS the single source of truth for the application's reactive state.
+ * 2. MUST remain pure and free of logic.
+ * 3. ENFORCES architectural consistency between the background engine and the UI.
+ *
  * @contract
  *   assertions:
  *     purity: pure
@@ -12,7 +21,6 @@
 import type { SymbolGraph, ResolutionLevel } from '../logic/symbolGraph/types.js';
 import type { WorkerPool } from '../logic/worker/WorkerPool.js';
 
-// Re-export SlicerConfig related types for use in FileSource
 export interface Preset {
   id: string;
   name: string;
@@ -49,11 +57,7 @@ export interface SlicerConfig {
 }
 
 /**
- * @id packages/core/src/state/slicer-state.ts#FileEntry
- * @description
  * Represents a file within the application's memory.
- * Unlike the legacy version which bound directly to JSZip, this version delegates
- * data fetching to the abstract FileSource.
  */
 export interface FileEntry {
   path: string;
@@ -80,8 +84,6 @@ export interface SanitationReport {
 }
 
 /**
- * @id packages/core/src/state/slicer-state.ts#SlicerState
- * @description
  * The root state interface for the Zustand store.
  */
 export interface SlicerState {
@@ -91,7 +93,6 @@ export interface SlicerState {
   
   /**
    * The currently active data adapter instance.
-   * Retained in state to allow writing config changes back to the source.
    */
   activeAdapter: import('../types/fileSource.js').FileSource | null;
 
@@ -104,13 +105,19 @@ export interface SlicerState {
   /** The persistent background processing pool */
   workerPool: WorkerPool | null;
 
+  // Semantically Distilled Context (The Dictionary)
+  /** Aggregated registry of type definitions: FilePath -> { SymbolName -> Source } */
+  typeLibrary: Map<string, Record<string, string>>;
+  /** Aggregated registry of synthetic signatures: FilePath -> { SymbolName -> Source } */
+  signatureLibrary: Map<string, Record<string, string>>;
+
   // Derived Data
   symbolGraph: SymbolGraph | null;
   graphStatus: GraphStatus;
-  sanitationReport: SanitationReport | null; // Mostly for Web/Zip mode
+  sanitationReport: SanitationReport | null;
   resolutionErrors: string[];
 
-  // Optimistic Assembly State (NEW)
+  // Optimistic Assembly State
   isAssembling: boolean;
   assembledPackText: string | null;
   accurateTokenCount: number | null;
@@ -120,14 +127,13 @@ export interface SlicerState {
   
   // Actions
   setTargetedPathsInput: (paths: string) => void;
-  /** Full background build of the dependency graph */
+  /** Full background build of the dependency graph and type library */
   ensureSymbolGraph: () => Promise<void>;
   /** Incremental background update for a single changed file */
   patchGraphNode: (path: string) => Promise<void>;
   
   /**
    * Triggers the background assembly of the context pack.
-   * Handles Summary generation, Boundary scanning, and Token counting.
    */
   orchestrateAssembly: (
     targets: Array<{ path: string; resolution: ResolutionLevel }>,
@@ -137,7 +143,7 @@ export interface SlicerState {
   setFileSource: (source: import('../types/fileSource.js').FileSource, sourceType: SourceType) => Promise<void>;
   
   /**
-   * Updates the configuration in the store and attempts to persist it via the active adapter.
+   * Updates the configuration and persists it.
    */
   updateConfig: (newConfig: SlicerConfig) => Promise<void>;
   
@@ -160,7 +166,12 @@ export const initialState: Omit<
   status: 'idle',
   source: 'none',
   error: null,
-  workerPool: null, // Initialized
+  workerPool: null,
+  
+  // Dictionary Initial State
+  typeLibrary: new Map(),
+  signatureLibrary: new Map(),
+
   symbolGraph: null,
   graphStatus: 'idle',
   sanitationReport: null,

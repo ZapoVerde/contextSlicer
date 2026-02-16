@@ -1,26 +1,20 @@
 /**
  * @file packages/core/test/harness/network-harness.ts
- * @stamp {"ts":"2026-02-16T23:55:00Z"}
+ * @stamp {"ts":"2026-02-16T21:10:00Z"}
  * @architectural-role Utility / Test Infrastructure
  * @description
- * The authoritative test harness for the Hardened Prism Network. Bridges the 
- * gap between physical test fixtures and logical engines. Implements a 
- * MockWorkerPool to allow the multi-threaded build logic to execute within 
- * the Node.js test environment. Updated with safe, extension-aware parsing.
+ * The authoritative test harness for the Hardened Prism Network. Updated to 
+ * support the Pre-Computed Type Closure architecture. The MockWorkerPool 
+ * now simulates the semantic mining phase, extracting type registries and 
+ * synthetic signatures from the test network files.
  * 
  * @core-principles
  * 1. TESTABILITY: MUST provide a synchronous simulation of worker threads.
- * 2. ROBUSTNESS: MUST NOT attempt to parse non-code files as ASTs.
- * 3. CONSISTENCY: Uses the same analysis logic as the production worker.
+ * 2. CONSISTENCY: Uses the same analysis logic as the production worker.
+ * 3. COMPLIANCE: Matches the updated DistilledMetadata messaging protocol.
  * 
  * @api-declaration
  *   export class NetworkHarness { ... }
- * 
- * @contract
- *   assertions:
- *     purity: mutates # Orchestrates setup and indexing.
- *     state_ownership: [fileIndex, symbolGraph]
- *     external_io: fs
  */
 
 import fs from 'fs';
@@ -42,8 +36,6 @@ const __dirname = path.dirname(__filename);
 
 /**
  * A specialized simulation of the WorkerPool for Node.js testing.
- * Instead of spawning threads, it executes the analysis logic 
- * sequentially in the main process.
  */
 class MockWorkerPool {
   public async init(): Promise<void> {
@@ -56,13 +48,14 @@ class MockWorkerPool {
   ): Promise<WorkerResult> {
     if (type === 'ANALYZE_FILE') {
       try {
-        // Fix: Extension check to ensure the worker only parses scripts
         if (!/\.(ts|tsx|js|jsx)$/.test(payload.path)) {
            return { taskId: 'mock-task' };
         }
 
         const ast = parseSourceToAst(payload.content);
         const imports: string[] = [];
+        const typeRegistry: Record<string, string> = {};
+        const syntheticSignatures: Record<string, string> = {};
 
         traverse(ast, {
           ImportDeclaration(p) {
@@ -70,6 +63,38 @@ class MockWorkerPool {
           },
           ExportNamedDeclaration(p) {
             if (p.node.source) imports.push(p.node.source.value);
+            
+            const decl = p.node.declaration;
+            if (!decl) return;
+
+            // Extract Type Registry
+            if (
+              decl.type === 'TSInterfaceDeclaration' ||
+              decl.type === 'TSTypeAliasDeclaration' ||
+              decl.type === 'TSEnumDeclaration'
+            ) {
+              if (decl.id?.type === 'Identifier') {
+                const name = decl.id.name;
+                if (decl.start !== null && decl.end !== null) {
+                  typeRegistry[name] = payload.content.slice(decl.start, decl.end);
+                }
+              }
+            }
+            // Generate Synthetic Signatures for Values
+            else if (decl.type === 'VariableDeclaration') {
+              decl.declarations.forEach((d) => {
+                if (d.id.type === 'Identifier') {
+                  const name = d.id.name;
+                  syntheticSignatures[name] = `export declare const ${name}: any;`;
+                }
+              });
+            }
+            else if (decl.type === 'FunctionDeclaration') {
+              if (decl.id?.type === 'Identifier') {
+                const name = decl.id.name;
+                syntheticSignatures[name] = `export declare function ${name}(...args: any[]): any;`;
+              }
+            }
           },
           ExportAllDeclaration(p) {
             imports.push(p.node.source.value);
@@ -85,6 +110,8 @@ class MockWorkerPool {
             hasReexports: hasReexports(ast),
             hasLogicActivity: hasLogicActivity(ast),
             isBarrel: isBarrelFile(ast),
+            typeRegistry,
+            syntheticSignatures
           },
         };
       } catch (e) {
@@ -107,6 +134,8 @@ class MockWorkerPool {
 export class NetworkHarness {
   private readonly fileIndex: Map<string, FileEntry> = new Map();
   private symbolGraph: SymbolGraph | null = null;
+  private typeLib: Map<string, Record<string, string>> = new Map();
+  private signLib: Map<string, Record<string, string>> = new Map();
   private readonly networkPath: string;
 
   private constructor() {
@@ -141,11 +170,7 @@ export class NetworkHarness {
         }
       }
     };
-
-    if (!fs.existsSync(this.networkPath)) {
-      throw new Error(`Test network not found at: ${this.networkPath}. Run setup-network.cjs first.`);
-    }
-
+    if (!fs.existsSync(this.networkPath)) throw new Error('Test network not found');
     walk(this.networkPath);
   }
 
@@ -158,42 +183,29 @@ export class NetworkHarness {
     };
 
     const mockPool = new MockWorkerPool() as unknown as WorkerPool;
-    this.symbolGraph = await buildSymbolGraph(this.fileIndex, aliasMap, errors, mockPool);
-
-    if (errors.length > 0) {
-      console.error('\n' + '='.repeat(60));
-      console.error('[Harness] Graph build completed with resolution errors:');
-      errors.forEach(e => console.error(`  - ${e}`));
-      console.error('='.repeat(60) + '\n');
+    
+    // Manual pass to build registries since buildSymbolGraph only returns the graph
+    for (const file of this.fileIndex.values()) {
+      if (!/\.(ts|tsx|js|jsx)$/.test(file.path)) continue;
+      const res = await mockPool.execute('ANALYZE_FILE', { path: file.path, content: await file.getText() });
+      if (res.payload) {
+        this.typeLib.set(file.path, res.payload.typeRegistry);
+        this.signLib.set(file.path, res.payload.syntheticSignatures);
+      }
     }
+
+    this.symbolGraph = await buildSymbolGraph(this.fileIndex, aliasMap, errors, mockPool);
   }
 
-  public getFileIndex(): Map<string, FileEntry> {
-    return this.fileIndex;
-  }
+  public getFileIndex(): Map<string, FileEntry> { return this.fileIndex; }
+  public getSymbolGraph(): SymbolGraph { return this.symbolGraph!; }
+  public getTypeLib() { return this.typeLib; }
+  public getSignLib() { return this.signLib; }
 
-  public getSymbolGraph(): SymbolGraph {
-    if (!this.symbolGraph) throw new Error('Graph not initialized');
-    return this.symbolGraph;
-  }
-
-  /**
-   * Safe AST retrieval. Only parses supported script extensions.
-   */
   public getAst(filePath: string): any {
     const entry = this.fileIndex.get(filePath);
-    if (!entry) return null;
-    
-    // Safety check: Only parse if it's a code file
-    if (!/\.(ts|tsx|js|jsx)$/.test(filePath)) {
-      return null;
-    }
-
+    if (!entry || !/\.(ts|tsx|js|jsx)$/.test(filePath)) return null;
     const content = fs.readFileSync(path.join(this.networkPath, filePath), 'utf-8');
-    try {
-      return parseSourceToAst(content);
-    } catch {
-      return null;
-    }
+    try { return parseSourceToAst(content); } catch { return null; }
   }
 }
