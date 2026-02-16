@@ -1,45 +1,91 @@
 /**
  * @file packages/core/test/harness/network-harness.ts
- * @stamp {"ts":"2026-02-15T23:15:00Z"}
- * @architectural-role Utility
+ * @stamp {"ts":"2026-02-16T18:30:00Z"}
+ * @architectural-role Utility / Test Infrastructure
  * @description
- * The authoritative test harness for the Hardened Prism Network v2.1.
- * Bridges the gap between the physical test fixture and the internal 
- * logical engines by simulating the FileIndex and orchestrating the 
- * Symbol Graph construction.
+ * The authoritative test harness for the Hardened Prism Network. Bridges the 
+ * gap between physical test fixtures and logical engines. Implements a 
+ * MockWorkerPool to allow the multi-threaded build logic to execute within 
+ * the Node.js test environment.
+ * 
+ * @core-principles
+ * 1. TESTABILITY: MUST provide a synchronous simulation of worker threads.
+ * 2. ISOLATION: Ensures tests do not depend on browser-specific APIs (Web Workers).
+ * 3. CONSISTENCY: Uses the same analysis logic as the production worker.
  * 
  * @api-declaration
- *   export class NetworkHarness {
- *     static async bootstrap(): Promise<NetworkHarness>;
- *     public getFileIndex(): Map<string, FileEntry>;
- *     public getSymbolGraph(): SymbolGraph;
- *     public getAst(path: string): File | null;
- *   }
+ *   export class NetworkHarness { ... }
  * 
  * @contract
  *   assertions:
  *     purity: mutates # Orchestrates setup and indexing.
- *     state_ownership: [fileIndex, symbolGraph, astCache]
+ *     state_ownership: [fileIndex, symbolGraph]
  *     external_io: fs
  */
 
 import fs from 'fs';
 import path from 'path';
-import { parse } from '@babel/parser';
-import type { File } from '@babel/types';
-import { buildSymbolGraph } from '../../src/logic/symbolGraph';
-import type { SymbolGraph } from '../../src/logic/symbolGraph/types';
-import type { FileEntry } from '../../src/state/slicer-state';
+import { fileURLToPath } from 'url';
+import { buildSymbolGraph } from '../../src/logic/symbolGraph/index.js';
+import { discoverSymbolsInAst } from '../../src/logic/symbolGraph/passes/2_discoverSymbols.js';
+import { parseSourceToAst } from '../../src/logic/symbolGraph/passes/1_buildAstCache.js';
+import { hasReexports, isBarrelFile } from '../../src/logic/symbolGraph/analyzers/barrelDetector.js';
+import { hasLogicActivity } from '../../src/logic/symbolGraph/analyzers/flowAnalyzer.js';
+import type { SymbolGraph } from '../../src/logic/symbolGraph/types.js';
+import type { FileEntry } from '../../src/state/slicer-state.js';
+import type { WorkerPool } from '../../src/logic/worker/WorkerPool.js';
+import type { WorkerResult, TaskType } from '../../src/logic/worker/types.js';
+
+// Resolve __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * A specialized simulation of the WorkerPool for Node.js testing.
+ * Instead of spawning threads, it executes the analysis logic 
+ * sequentially in the main process.
+ */
+class MockWorkerPool {
+  public async init(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public async execute(
+    type: TaskType,
+    payload: { path: string; content: string }
+  ): Promise<WorkerResult> {
+    if (type === 'ANALYZE_FILE') {
+      try {
+        const ast = parseSourceToAst(payload.content);
+        return {
+          taskId: 'mock-task',
+          payload: {
+            filePath: payload.path,
+            symbols: discoverSymbolsInAst(ast),
+            hasReexports: hasReexports(ast),
+            hasLogicActivity: hasLogicActivity(ast),
+            isBarrel: isBarrelFile(ast),
+          },
+        };
+      } catch (e) {
+        return {
+          taskId: 'mock-task',
+          error: e instanceof Error ? e.message : 'Mock Analysis Failed',
+        };
+      }
+    }
+    return { taskId: 'mock-task' };
+  }
+}
 
 /**
  * @id packages/core/test/harness/network-harness.ts#NetworkHarness
  * @description
  * Coordinates the loading of the test network into memory and the 
- * initialization of core architectural logic (Graphing/Parsing).
+ * initialization of core architectural logic.
  */
 export class NetworkHarness {
   private readonly fileIndex: Map<string, FileEntry> = new Map();
-  private readonly astCache: Map<string, File> = new Map();
   private symbolGraph: SymbolGraph | null = null;
   private readonly networkPath: string;
 
@@ -79,19 +125,6 @@ export class NetworkHarness {
             getUint8: async () => new Uint8Array(content),
           };
           this.fileIndex.set(relPath, entry);
-
-          // Eagerly parse scripts for the AST cache
-          if (/\.(ts|tsx|js|jsx)$/.test(relPath)) {
-            try {
-              const ast = parse(content.toString('utf-8'), {
-                sourceType: 'module',
-                plugins: ['typescript', 'jsx'],
-              });
-              this.astCache.set(relPath, ast);
-            } catch (e) {
-              // Intentionally malformed files or Babel-incompatible syntax
-            }
-          }
         }
       }
     };
@@ -105,7 +138,7 @@ export class NetworkHarness {
 
   /**
    * Orchestrates the build of the Symbol Graph using the provided FileIndex.
-   * Injects monorepo aliases to ensure cross-package resolution works correctly.
+   * Injects monorepo aliases and the Mock Worker Pool.
    */
   private async buildGraph(): Promise<void> {
     const errors: string[] = [];
@@ -115,11 +148,11 @@ export class NetworkHarness {
       '@prism/web': 'packages/web'
     };
 
-    this.symbolGraph = await buildSymbolGraph(this.fileIndex, aliasMap, errors);
+    // Cast MockWorkerPool to WorkerPool to satisfy the interface requirement
+    const mockPool = new MockWorkerPool() as unknown as WorkerPool;
 
-    // CRITICAL DIAGNOSTIC: 
-    // If the graph contains resolution errors (like unresolvable relative imports),
-    // we must report them loudly to the test runner to prevent "Ghost Dependencies."
+    this.symbolGraph = await buildSymbolGraph(this.fileIndex, aliasMap, errors, mockPool);
+
     if (errors.length > 0) {
       console.error('\n' + '='.repeat(60));
       console.error('[Harness] Graph build completed with resolution errors:');
@@ -137,11 +170,12 @@ export class NetworkHarness {
     return this.symbolGraph;
   }
 
-  public getAst(filePath: string): File | null {
-    return this.astCache.get(filePath) || null;
-  }
-
-  public getAstCache(): Map<string, File> {
-    return this.astCache;
+  public getAst(filePath: string): any {
+    const entry = this.fileIndex.get(filePath);
+    if (!entry) return null;
+    
+    // Synchronous read for testing convenience
+    const content = fs.readFileSync(path.join(this.networkPath, filePath), 'utf-8');
+    return parseSourceToAst(content);
   }
 }

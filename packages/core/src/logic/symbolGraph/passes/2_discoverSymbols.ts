@@ -1,104 +1,138 @@
 /**
  * @file packages/core/src/logic/symbolGraph/passes/2_discoverSymbols.ts
- * @stamp {"ts":"2025-11-29T03:30:00Z"}
- * @architectural-role Symbol Discovery Pass
- *
+ * @stamp {"ts":"2026-02-16T13:45:00Z"}
+ * @architectural-role Business Logic / Utility
  * @description
- * Pass 2 of the graph builder. It traverses the ASTs to identify all top-level
- * symbol declarations (classes, functions, variables) and creates the initial
- * nodes in the graph. It captures traversal errors to ensure robust execution.
+ * Provides pure functions for identifying top-level symbol declarations within 
+ * a Babel AST. This logic is used by both the main thread for graph indexing 
+ * and by Web Workers for metadata distillation.
  *
  * @core-principles
- * 1. IS responsible for population of the graph nodes.
- * 2. MUST NOT crash the entire process due to a single malformed file.
- * 3. DELEGATES error reporting to the shared error collection.
+ * 1. PURITY: Must remain stateless and side-effect free.
+ * 2. CONSISTENCY: ENFORCES identical symbol discovery rules across all threads.
+ * 3. COMPLIANCE: Returns a flat list of symbol names suitable for DistilledMetadata.
+ *
+ * @api-declaration
+ *   export function discoverSymbolsInAst(ast: File): string[];
+ *   export function discoverSymbols(astCache: Map<string, File>, graph: SymbolGraph, errors: string[]): void;
  *
  * @contract
  *   assertions:
- *     purity: mutates # Mutates the passed graph and error array.
- *     state_ownership: none
+ *     purity: pure
  *     external_io: none
  */
 
-import traverse, { NodePath } from '@babel/traverse';
-import type {
-  Node,
-  FunctionDeclaration,
-  ClassDeclaration,
-  TSEnumDeclaration,
-  TSInterfaceDeclaration,
-  TSTypeAliasDeclaration,
-  VariableDeclaration,
-} from '@babel/types';
-import type { SymbolGraph } from '../types';
+import traverse from '@babel/traverse';
+import type { File } from '@babel/types';
+import type { SymbolGraph } from '../types.js';
 
-type AstCache = Map<string, Node>;
+/**
+ * @id packages/core/src/logic/symbolGraph/passes/2_discoverSymbols.ts#discoverSymbolsInAst
+ * @description
+ * Scans a single AST for top-level declarations and exports.
+ * 
+ * @param ast - The Babel AST File node.
+ * @returns A deduplicated list of symbol names found at the module root.
+ */
+export function discoverSymbolsInAst(ast: File): string[] {
+  const symbols = new Set<string>();
 
+  traverse(ast, {
+    // 1. Named Exports and Declarations
+    ExportNamedDeclaration(path) {
+      const decl = path.node.declaration;
+      if (decl) {
+        if (decl.type === 'VariableDeclaration') {
+          decl.declarations.forEach((d) => {
+            if (d.id.type === 'Identifier') symbols.add(d.id.name);
+          });
+        } else if ('id' in decl && decl.id?.type === 'Identifier') {
+          symbols.add(decl.id.name);
+        }
+      }
+      path.node.specifiers.forEach((spec) => {
+        if (spec.exported.type === 'Identifier') {
+          symbols.add(spec.exported.name);
+        }
+      });
+    },
+
+    // 2. Default Exports
+    ExportDefaultDeclaration() {
+      symbols.add('default');
+    },
+
+    // 3. Top-level declarations (even if not exported, for internal graph linking)
+    FunctionDeclaration(path) {
+      if (path.parent.type === 'Program' && path.node.id) {
+        symbols.add(path.node.id.name);
+      }
+    },
+    ClassDeclaration(path) {
+      if (path.parent.type === 'Program' && path.node.id) {
+        symbols.add(path.node.id.name);
+      }
+    },
+    TSInterfaceDeclaration(path) {
+      if (path.parent.type === 'Program' && path.node.id) {
+        symbols.add(path.node.id.name);
+      }
+    },
+    TSTypeAliasDeclaration(path) {
+      if (path.parent.type === 'Program' && path.node.id) {
+        symbols.add(path.node.id.name);
+      }
+    },
+    TSEnumDeclaration(path) {
+      if (path.parent.type === 'Program' && path.node.id) {
+        symbols.add(path.node.id.name);
+      }
+    }
+  });
+
+  return Array.from(symbols);
+}
+
+/**
+ * @id packages/core/src/logic/symbolGraph/passes/2_discoverSymbols.ts#discoverSymbols
+ * @description
+ * Legacy orchestrator for main-thread graph building.
+ * Populates a SymbolGraph based on a cache of ASTs.
+ */
 export function discoverSymbols(
-  astCache: AstCache, 
+  astCache: Map<string, File>,
   graph: SymbolGraph,
   errors: string[]
 ): void {
   for (const [filePath, ast] of astCache.entries()) {
-    // Ensure a file-level node exists for every file.
-    if (!graph.has(filePath)) {
-      graph.set(filePath, {
-        id: filePath,
-        filePath: filePath,
-        symbolName: '(file)',
-        dependencies: new Set(),
-        dependents: new Set(),
-      });
-    }
-
-    // Helper to create a new symbol node if it doesn't already exist.
-    const createNode = (name: string) => {
-      const id = `${filePath}#${name}`;
-      if (!graph.has(id)) {
-        graph.set(id, {
-          id,
-          filePath: filePath,
-          symbolName: name,
+    try {
+      // Ensure file-level node exists
+      if (!graph.has(filePath)) {
+        graph.set(filePath, {
+          id: filePath,
+          filePath,
+          symbolName: '(file)',
           dependencies: new Set(),
           dependents: new Set(),
         });
       }
-    };
 
-    const declarationVisitor = (
-      path: NodePath<
-        FunctionDeclaration | ClassDeclaration | TSEnumDeclaration | TSInterfaceDeclaration | TSTypeAliasDeclaration
-      >
-    ) => {
-      if (path.node.id?.name) {
-        createNode(path.node.id.name);
-      }
-    };
-
-    try {
-      traverse(ast, {
-        FunctionDeclaration: declarationVisitor,
-        ClassDeclaration: declarationVisitor,
-        TSEnumDeclaration: declarationVisitor,
-        TSInterfaceDeclaration: declarationVisitor,
-        TSTypeAliasDeclaration: declarationVisitor,
-        VariableDeclaration(path: NodePath<VariableDeclaration>) {
-          // Only consider variables declared at the top level of the module.
-          if (path.parent.type === 'Program' || path.parent.type === 'ExportNamedDeclaration') {
-            for (const decl of path.node.declarations) {
-              if (decl.id.type === 'Identifier') {
-                createNode(decl.id.name);
-              }
-            }
-          }
-        },
-        ExportDefaultDeclaration() {
-          createNode('default');
-        },
+      const symbolNames = discoverSymbolsInAst(ast);
+      
+      symbolNames.forEach(name => {
+        const id = `${filePath}#${name}`;
+        if (!graph.has(id)) {
+          graph.set(id, {
+            id,
+            filePath,
+            symbolName: name,
+            dependencies: new Set(),
+            dependents: new Set(),
+          });
+        }
       });
-    } catch (e: unknown) {
+    } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // We push to the error array so the user can see which files were skipped
       errors.push(`[Symbol Discovery Failed] ${filePath}: ${msg}`);
     }
   }

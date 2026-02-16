@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/logic/adapters/zipFileSource.ts
- * @stamp {"ts":"2025-11-28T13:00:00Z"}
+ * @stamp {"ts":"2026-02-16T11:10:00Z"}
  * @architectural-role Data Adapter
  *
  * @description
@@ -11,28 +11,31 @@
  * @core-principles
  * 1. IS the adapter for "Web Mode" or "Manual Upload Mode".
  * 2. ENFORCES sanitation rules (denylists, extensions) dynamically.
- * 3. SUPPORTS configuration overrides via ephemeral in-memory state.
+ * 3. COMPATIBILITY: Implements the push notification interface as a no-op for static data.
  *
  * @contract
  *   assertions:
  *     purity: mutates # Maintains internal state (zip object and volatile config).
- *     state_ownership: [zip, config, volatileConfig]
+ *     state_ownership: [zip, zipConfig, volatileConfig]
  *     external_io: none # Reads from memory.
  */
 
 import JSZip from 'jszip';
 import ignore from 'ignore';
 import yaml from 'js-yaml';
-import type { FileSource, FileMetadata } from '../../types/fileSource';
-import type { SlicerConfig } from '../../state/slicer-state';
-import { ACCEPTED_FILE_EXTENSIONS, EXPLICIT_DENY_PATTERNS } from '../../config/sanitation.config';
+import type { FileSource, FileMetadata, FileEvent } from '../../types/fileSource.js';
+import type { SlicerConfig } from '../../state/slicer-state.js';
+import { ACCEPTED_FILE_EXTENSIONS, EXPLICIT_DENY_PATTERNS } from '../../config/sanitation.config.js';
 
+/**
+ * @id packages/core/src/logic/adapters/zipFileSource.ts#ZipFileSource
+ * @description
+ * Adapter for handling static ZIP archives as project sources.
+ */
 export class ZipFileSource implements FileSource {
   private zip: JSZip | null = null;
   private file: File;
-  // The config found INSIDE the zip file (static)
   private zipConfig: SlicerConfig | null = null;
-  // The config modified by the user in the UI (volatile)
   private volatileConfig: SlicerConfig | null = null;
 
   constructor(file: File) {
@@ -40,18 +43,13 @@ export class ZipFileSource implements FileSource {
   }
 
   /**
-   * Updates the in-memory configuration.
-   * This triggers a "re-filter" of the existing zip content in the next getFileList call.
+   * Updates the in-memory configuration for the current session.
    */
   async saveConfig(config: SlicerConfig): Promise<void> {
-    console.log('[ZipFileSource] Updating volatile configuration.');
     this.volatileConfig = config;
     return Promise.resolve();
   }
 
-  /**
-   * Initialize the zip and extract the config if present.
-   */
   private async init() {
     if (this.zip) return;
     this.zip = await JSZip.loadAsync(this.file);
@@ -63,7 +61,7 @@ export class ZipFileSource implements FileSource {
         try {
           this.zipConfig = yaml.load(configText) as SlicerConfig;
         } catch (e) {
-          console.warn('Failed to parse config from zip', e);
+          console.warn('[ZipFileSource] Failed to parse config from zip', e);
         }
       }
     }
@@ -75,10 +73,6 @@ export class ZipFileSource implements FileSource {
     return candidates.find(path => this.zip!.file(path));
   }
 
-  /**
-   * Returns the active configuration.
-   * Priority: Volatile (User Edits) > Zip (File) > Defaults.
-   */
   async getConfig(): Promise<SlicerConfig> {
     await this.init();
 
@@ -106,19 +100,12 @@ export class ZipFileSource implements FileSource {
     if (!this.zip) throw new Error('Zip failed to initialize');
 
     const config = await this.getConfig();
-    
-    // Initialize ignore engine with the ACTIVE config
-    const ig = ignore().add(config.sanitation.denyPatterns);
-    
-    // Handle Extension Whitelist
-    // If acceptedExtensions is null/empty in config (rare), fall back to defaults or allow all?
-    // We stick to the config. If the user clears it, we might show nothing, which is correct behavior.
+    const ig = (ignore as any)().add(config.sanitation.denyPatterns);
     const acceptedExts = new Set(config.sanitation.acceptedExtensions);
     const hasExtensionFilter = acceptedExts.size > 0;
     
     const results: FileMetadata[] = [];
 
-    // Detect base folder
     const filePaths = Object.keys(this.zip.files).filter(p => !this.zip!.files[p].dir);
     let commonBase = '';
     if (filePaths.length > 0) {
@@ -132,19 +119,11 @@ export class ZipFileSource implements FileSource {
       const entry = this.zip.files[fullPath];
       const relativePath = fullPath.substring(commonBase.length); 
 
-      // 1. Pattern Check
       if (ig.ignores(relativePath)) continue;
 
-      // 2. Extension Check
       if (hasExtensionFilter) {
         const ext = relativePath.split('.').pop()?.toLowerCase();
-        // Check if extension is allowed. 
-        // Also allow dotfiles (like .gitignore) if they are explicitly in the list or if the list is permissive.
-        // Logic: If it has an extension, check it. If no extension (Makefile), keep it? 
-        // For safety in web mode, we usually strictly filter by extension.
         if (ext && !acceptedExts.has(ext)) {
-           // Edge case: Allow specific dotfiles if explicitly whitelisted (e.g. 'gitignore')
-           // otherwise skip.
            if (!acceptedExts.has(relativePath.split('/').pop()?.toLowerCase() || '')) continue;
         }
       }
@@ -177,5 +156,12 @@ export class ZipFileSource implements FileSource {
     const filePaths = Object.keys(this.zip.files);
     if (this.zip.file(relativePath)) return relativePath;
     return filePaths.find(p => p.endsWith(relativePath));
+  }
+
+  /**
+   * No-op implementation for static Zip sources.
+   */
+  onWatcherEvent(_callback: (event: FileEvent) => void): void {
+    // Zip files are immutable snapshots; no events are ever emitted.
   }
 }

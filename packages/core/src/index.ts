@@ -1,6 +1,6 @@
 /**
  * @file packages/core/src/index.ts
- * @stamp {"ts":"2025-11-24T07:00:00Z"}
+ * @stamp {"ts":"2026-02-16T16:30:00Z"}
  * @architectural-role Feature Entry Point
  *
  * @description
@@ -27,7 +27,8 @@ export { default as ContextSlicerScreen } from './ContextSlicerScreen.js';
 export { useSlicerStore } from './state/useSlicerStore.js';
 
 // Types required for Adapter Implementation
-export type { FileSource, FileMetadata } from './types/fileSource.js';
+// Fix: Added FileEvent to the public API
+export type { FileSource, FileMetadata, FileEvent } from './types/fileSource.js';
 export type { SlicerConfig } from './state/slicer-state.js';
 
 // Theme

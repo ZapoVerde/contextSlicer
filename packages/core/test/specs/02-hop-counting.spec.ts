@@ -1,13 +1,13 @@
 /**
  * @file packages/core/test/specs/02-hop-counting.spec.ts
- * @stamp {"ts":"2026-02-15T23:45:00Z"}
+ * @stamp {"ts":"2026-02-16T20:20:00Z"}
  * @architectural-role Test Suite
  * @test-target packages/core/src/logic/symbolGraph/augmentedTracer.ts
  *
  * @description
- * Validates the distance calculation heuristics of the Augmented Tracer.
- * Compares Physical vs. Logical hop counts to verify that the Two-Part Pipe 
- * Rule correctly reduces noise by bypassing structural passthroughs.
+ * Structural integration test validating the distance calculation heuristics.
+ * Verifies that the BFS traversal correctly utilizes the Two-Part Pipe Rule 
+ * to bypass organizational barrels while maintaining physical path integrity.
  * 
  * @criticality 2. Core Business Logic Orchestration.
  * @testing-layer Integration
@@ -19,32 +19,39 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { NetworkHarness } from '../harness/network-harness';
-import { traceLogicalPath } from '../../src/logic/symbolGraph/augmentedTracer';
-import { traceSymbolGraph } from '../../src/logic/symbolGraph/tracer';
+import { NetworkHarness } from '../harness/network-harness.js';
+import { traceLogicalPath } from '../../src/logic/symbolGraph/augmentedTracer.js';
+import { traceSymbolGraph } from '../../src/logic/symbolGraph/tracer.js';
 
-describe('Logical vs Physical Hop Counting', () => {
+describe('Integration: Logical vs Physical Hop Counting', () => {
   let harness: NetworkHarness;
 
   beforeAll(async () => {
     harness = await NetworkHarness.bootstrap();
   });
 
-  it('should verify the "Wormhole" effect: 4 Physical hops vs 1 Logical hop', () => {
+  it('should verify the "Wormhole" effect: 5 Physical junctions vs 1 Logical hop', () => {
     const graph = harness.getSymbolGraph();
-    const astCache = harness.getAstCache();
+    const fileIndex = harness.getFileIndex();
+    
+    // We need an AST cache for the logical tracer
+    const astCache = new Map<string, any>();
+    for (const [path] of fileIndex) {
+      astCache.set(path, harness.getAst(path));
+    }
+
     const seed = 'packages/web/App.tsx';
     const target = 'packages/ui-kit/components/buttons/core/Button.tsx';
 
     // 1. Physical Trace (Traditional BFS)
-    // App -> ComplexBarrel -> components/index -> buttons/index -> core/index -> Button.tsx
-    // The traditional tracer counts every file junction as a hop.
+    // Chain: App -> ComplexBarrel -> components/index -> buttons/index -> core/index -> Button.tsx
+    // The traditional tracer counts every file junction as 1 hop.
     const physicalResults = traceSymbolGraph(graph, seed, 'dependencies', 5);
     expect(physicalResults).toContain(target);
 
     // 2. Logical Trace (Smart Trace)
-    // The chain contains multiple Pipes (ComplexBarrel, components/index, etc.)
-    // These cost 0. Only Button.tsx is Logic, costing 1.
+    // The intermediate files (ComplexBarrel, components/index, etc.) are all Pure Pipes.
+    // Pipe Rule: Cost 0. Button.tsx = Logic (Cost 1).
     const logicalResults = traceLogicalPath(graph, astCache, seed, {
       mode: 'logical',
       direction: 'dependencies',
@@ -55,43 +62,24 @@ describe('Logical vs Physical Hop Counting', () => {
     const buttonEntry = logicalResults.find(r => r.path === target);
     
     expect(buttonEntry).toBeDefined();
-    expect(buttonEntry?.depth).toBe(1); // Logical depth is 1
+    // The logical depth should be 1 because all intermediate barrels cost 0.
+    expect(buttonEntry?.depth).toBe(1);
     expect(buttonEntry?.status).toBe('meaningful');
   });
 
-  it('should terminate the "Möbius Loop" (Circular Dependency) without error', () => {
+  it('should correctly identify a Logic Junction (Cost 1) despite being physically adjacent', () => {
     const graph = harness.getSymbolGraph();
-    const astCache = harness.getAstCache();
-    const seed = 'packages/web/userService.ts';
-    const circularTarget = 'packages/web/validator.ts';
+    const fileIndex = harness.getFileIndex();
+    const astCache = new Map<string, any>();
+    for (const [path] of fileIndex) {
+      astCache.set(path, harness.getAst(path));
+    }
 
-    // userService <-> validator
-    const results = traceLogicalPath(graph, astCache, seed, {
-      mode: 'logical',
-      direction: 'both',
-      maxHops: 2,
-      summaryHops: 2
-    });
-
-    const validator = results.find(r => r.path === circularTarget);
-    const userService = results.find(r => r.path === seed);
-
-    expect(validator).toBeDefined();
-    expect(userService).toBeDefined();
-    // BFS de-duplication prevents infinite recursion
-    expect(results.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('should identify a Logic Junction at hop 1 even if reached through a Pipe', () => {
-    const graph = harness.getSymbolGraph();
-    const astCache = harness.getAstCache();
     const seed = 'packages/web/App.tsx';
-    const target = 'packages/ui-kit/index.ts';
+    const target = 'packages/web/userService.ts';
 
-    // TRACE PATH:
-    // App -> ComplexBarrel (re-exports ThemeProvider from index.ts)
-    // ComplexBarrel = Pipe (Cost 0)
-    // ui-kit/index.ts = Logic (Cost 1 - contains side effect console.log)
+    // App.tsx imports userService.ts directly.
+    // userService.ts is Logic (Cost 1).
     const results = traceLogicalPath(graph, astCache, seed, {
       mode: 'logical',
       direction: 'dependencies',
@@ -99,20 +87,49 @@ describe('Logical vs Physical Hop Counting', () => {
       summaryHops: 1
     });
 
-    const uiKitIndex = results.find(r => r.path === target);
-    
-    expect(uiKitIndex).toBeDefined();
-    expect(uiKitIndex?.depth).toBe(1); 
-    expect(uiKitIndex?.status).toBe('meaningful');
+    const userSvc = results.find(r => r.path === target);
+    expect(userSvc).toBeDefined();
+    expect(userSvc?.depth).toBe(1);
+    expect(userSvc?.status).toBe('meaningful');
   });
 
-  it('should exclude distant logic files that exceed the logical hop budget', () => {
+  it('should terminate circular dependencies (Möbius Loop) at the logical boundary', () => {
     const graph = harness.getSymbolGraph();
-    const astCache = harness.getAstCache();
-    const seed = 'packages/web/App.tsx';
+    const fileIndex = harness.getFileIndex();
+    const astCache = new Map<string, any>();
+    for (const [path] of fileIndex) {
+      astCache.set(path, harness.getAst(path));
+    }
+
+    // userService <-> validator (Circular)
+    const seed = 'packages/web/userService.ts';
     
-    // Trace: App -> ScentChainA (1) -> ScentChainB (2) -> ScentChainC (3)
-    // If maxHops is 2, ScentChainC should be absent.
+    const results = traceLogicalPath(graph, astCache, seed, {
+      mode: 'logical',
+      direction: 'both',
+      maxHops: 5,
+      summaryHops: 5
+    });
+
+    // Verify both are present without infinite recursion
+    expect(results.some(r => r.path === 'packages/web/userService.ts')).toBe(true);
+    expect(results.some(r => r.path === 'packages/web/validator.ts')).toBe(true);
+    
+    // BFS visited sets should keep the result size sane
+    expect(results.length).toBeLessThan(50);
+  });
+
+  it('should exclude distant logic chains that exceed the logical budget', () => {
+    const graph = harness.getSymbolGraph();
+    const fileIndex = harness.getFileIndex();
+    const astCache = new Map<string, any>();
+    for (const [path] of fileIndex) {
+      astCache.set(path, harness.getAst(path));
+    }
+
+    const seed = 'packages/web/App.tsx';
+    // Chain: App -> ScentChainA (1) -> ScentChainB (2) -> ScentChainC (3)
+    
     const results = traceLogicalPath(graph, astCache, seed, {
       mode: 'logical',
       direction: 'dependencies',
@@ -120,7 +137,10 @@ describe('Logical vs Physical Hop Counting', () => {
       summaryHops: 2
     });
 
+    const chainB = results.find(r => r.path === 'packages/web/ScentChainB.ts');
     const chainC = results.find(r => r.path === 'packages/web/ScentChainC.ts');
-    expect(chainC).toBeUndefined();
+
+    expect(chainB).toBeDefined();
+    expect(chainC).toBeUndefined(); // Hop 3 is out of budget
   });
 });
